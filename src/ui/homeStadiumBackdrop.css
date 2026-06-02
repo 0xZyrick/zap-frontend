@@ -1,0 +1,133 @@
+.home-stadium {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  color: #f8fafc;
+  background:
+    radial-gradient(ellipse 78% 48% at 50% 58%, rgba(50, 157, 65, 0.38), transparent 67%),
+    radial-gradient(ellipse 80% 34% at 50% 2%, rgba(128, 255, 166, 0.12), transparent 60%),
+    linear-gradient(180deg, #08140e 0%, #0d2818 36%, #123b20 66%, #08140e 100%);
+}
+
+.home-stadium__content {
+  position: relative;
+  z-index: 10;
+  min-height: 100%;
+}
+
+.home-stadium__sky {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    radial-gradient(circle at 18% 6%, rgba(224, 255, 230, 0.13), transparent 14%),
+    radial-gradient(circle at 82% 8%, rgba(224, 255, 230, 0.11), transparent 15%),
+    linear-gradient(180deg, rgba(0, 0, 0, .2), transparent 36%);
+}
+
+.home-stadium__stands {
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  pointer-events: none;
+  z-index: 2;
+  opacity: .52;
+}
+
+.home-stadium__stands--top {
+  top: 0;
+  height: 105px;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,.75), rgba(0,0,0,.18), transparent),
+    repeating-linear-gradient(90deg, rgba(34,197,94,.16) 0 2px, transparent 2px 15px, rgba(250,204,21,.1) 15px 17px, transparent 17px 30px);
+}
+
+.home-stadium__stands--bottom {
+  bottom: -42px;
+  height: 170px;
+  background:
+    linear-gradient(0deg, rgba(0,0,0,.76), rgba(0,0,0,.16), transparent),
+    repeating-linear-gradient(90deg, rgba(34,197,94,.11) 0 2px, transparent 2px 15px, rgba(250,204,21,.07) 15px 17px, transparent 17px 30px);
+}
+
+.home-stadium__pitch {
+  position: absolute;
+  left: 7%;
+  right: 7%;
+  top: 14%;
+  height: 45%;
+  z-index: 3;
+  border-radius: 28px;
+  opacity: .54;
+  background:
+    linear-gradient(90deg, transparent 49.85%, rgba(220,255,220,.23) 50%, transparent 50.15%),
+    radial-gradient(ellipse 10% 20% at 50% 50%, transparent 58%, rgba(220,255,220,.22) 60%, transparent 62%),
+    repeating-linear-gradient(90deg, rgba(255,255,255,.024) 0px, rgba(255,255,255,.024) 1px, transparent 1px, transparent 38px),
+    repeating-linear-gradient(180deg, rgba(255,255,255,.038) 0px, rgba(255,255,255,.038) 52px, rgba(0,0,0,.045) 52px, rgba(0,0,0,.045) 104px),
+    linear-gradient(180deg, #1a5422, #2a7b2e 48%, #18471e);
+  box-shadow:
+    0 42px 120px rgba(0,0,0,.46),
+    inset 0 0 0 1px rgba(255,255,255,.1),
+    inset 0 0 90px rgba(0,0,0,.32);
+  transform: none;
+  transform-origin: center top;
+}
+
+.home-stadium__spotlight {
+  position: absolute;
+  top: -8%;
+  width: 42%;
+  height: 70%;
+  z-index: 4;
+  opacity: .33;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.home-stadium__spotlight--left {
+  left: -10%;
+  background: linear-gradient(120deg, rgba(220,255,230,.2), rgba(220,255,230,.05) 42%, transparent 72%);
+  clip-path: polygon(0 0, 35% 0, 100% 100%, 25% 100%);
+}
+
+.home-stadium__spotlight--right {
+  right: -10%;
+  background: linear-gradient(240deg, rgba(220,255,230,.18), rgba(220,255,230,.045) 42%, transparent 72%);
+  clip-path: polygon(65% 0, 100% 0, 75% 100%, 0 100%);
+}
+
+.home-stadium__glow {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  background:
+    radial-gradient(ellipse 48% 28% at 50% 52%, rgba(34,197,94,.18), transparent 70%),
+    radial-gradient(ellipse 110% 84% at 50% 54%, transparent 52%, rgba(0,0,0,.36) 100%);
+}
+
+.home-stadium__texture {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  opacity: .18;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(90deg, rgba(255,255,255,.018) 0 1px, transparent 1px 7px),
+    repeating-linear-gradient(180deg, rgba(255,255,255,.012) 0 1px, transparent 1px 9px);
+  mask-image: radial-gradient(ellipse 84% 72% at center, black 0%, transparent 86%);
+}
+
+
+.home-stadium::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 8%;
+  height: 90px;
+  z-index: 7;
+  pointer-events: none;
+  background: radial-gradient(ellipse 50% 60% at 50% 50%, rgba(34,197,94,.12), transparent 72%);
+  filter: blur(8px);
+}

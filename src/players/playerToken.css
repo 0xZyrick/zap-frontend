@@ -1,0 +1,523 @@
+.player-token {
+  --token-size: 44px;
+  --team-main: #4da3ff;
+  --team-glow: rgba(77, 163, 255, 0.46);
+  --team-soft: rgba(77, 163, 255, 0.18);
+  --inner-bg: #071018;
+  --body-fill: #2563c7;
+  --body-stroke: rgba(191, 219, 254, 0.36);
+  --ring-top: #8fc9ff;
+  --ring-mid: #3b82f6;
+  --ring-bottom: #22c55e;
+  --jersey-top: #57a8ff;
+  --jersey-bottom: #174f9b;
+
+  position: relative;
+  width: var(--token-size);
+  height: var(--token-size);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  transform: translateZ(0);
+  will-change: transform;
+  filter:
+    drop-shadow(0 0 5px var(--team-glow))
+    drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+}
+
+.player-token__svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  shape-rendering: geometricPrecision;
+}
+
+.player-token__ring-stop-top { stop-color: var(--ring-top); }
+.player-token__ring-stop-mid { stop-color: var(--ring-mid); }
+.player-token__ring-stop-bottom { stop-color: var(--ring-bottom); }
+
+.player-token__inner-stop-top { stop-color: #263342; }
+.player-token__inner-stop-mid { stop-color: #111827; }
+.player-token__inner-stop-bottom { stop-color: #050b10; }
+
+.player-token__jersey-stop-top { stop-color: var(--jersey-top); }
+.player-token__jersey-stop-bottom { stop-color: var(--jersey-bottom); }
+
+.player-token__shadow {
+  fill: rgba(2, 8, 23, 0.96);
+  stroke: rgba(255, 255, 255, 0.08);
+  stroke-width: 2;
+}
+
+.player-token__outer {
+  fill: none;
+  stroke-width: 7;
+}
+
+.player-token__mid {
+  fill: rgba(15, 23, 42, 0.92);
+  stroke: var(--team-soft);
+  stroke-width: 2;
+}
+
+.player-token__inner {
+  stroke: rgba(255, 255, 255, 0.13);
+  stroke-width: 1.5;
+}
+
+.player-token__body {
+  stroke: var(--body-stroke);
+  stroke-width: 1.75;
+}
+
+.player-token__neck {
+  fill: #071018;
+  opacity: 0.9;
+}
+
+.player-token__label {
+  position: relative;
+  z-index: 2;
+  max-width: 68%;
+  margin-top: 5%;
+  color: #f8fafc;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: clamp(9px, calc(var(--token-size) * 0.29), 24px);
+  font-weight: 950;
+  line-height: 1;
+  letter-spacing: -0.07em;
+  text-align: center;
+  text-shadow:
+    0 2px 2px rgba(0, 0, 0, 0.96),
+    0 0 4px rgba(0, 0, 0, 0.82);
+  pointer-events: none;
+}
+
+.player-token--home {
+  --team-main: #4da3ff;
+  --team-glow: rgba(77, 163, 255, 0.48);
+  --team-soft: rgba(34, 197, 94, 0.16);
+  --ring-top: #9bd0ff;
+  --ring-mid: #3b82f6;
+  --ring-bottom: #22c55e;
+  --jersey-top: #5eb0ff;
+  --jersey-bottom: #1851a2;
+}
+
+.player-token--away {
+  --team-main: #ef4444;
+  --team-glow: rgba(239, 68, 68, 0.44);
+  --team-soft: rgba(248, 113, 113, 0.16);
+  --ring-top: #ff8a8a;
+  --ring-mid: #ef4444;
+  --ring-bottom: #7f1d1d;
+  --jersey-top: #e74d43;
+  --jersey-bottom: #861414;
+}
+
+.player-token--ballCarrier {
+  animation: playerTokenCarrierPulse 1.25s ease-in-out infinite;
+}
+
+.player-token--open {
+  --ring-top: #a7f3d0;
+  --ring-mid: #22c55e;
+  --ring-bottom: #06b6d4;
+  --team-glow: rgba(34, 197, 94, 0.56);
+  animation: playerTokenOpenPulse 1.4s ease-in-out infinite;
+}
+
+.player-token--support {
+  --ring-top: #a5f3fc;
+  --ring-mid: #22d3ee;
+  --ring-bottom: #2563eb;
+  --team-glow: rgba(34, 211, 238, 0.5);
+}
+
+.player-token--underPressure {
+  --ring-top: #fed7aa;
+  --ring-mid: #f97316;
+  --ring-bottom: #dc2626;
+  --team-glow: rgba(249, 115, 22, 0.58);
+  animation: playerTokenDangerPulse 0.9s ease-in-out infinite;
+}
+
+.player-token--underPressure .player-token__outer {
+  stroke-width: 8.25;
+}
+
+.player-token--tired {
+  filter: grayscale(0.45) drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+}
+
+.player-token--tired .player-token__outer {
+  stroke: #6b7280;
+}
+
+.player-token--keeper-style,
+.player-token--goalkeeper {
+  --ring-top: #bbf7d0;
+  --ring-mid: #22c55e;
+  --ring-bottom: #15803d;
+  --team-glow: rgba(74, 222, 128, 0.48);
+  --team-soft: rgba(187, 247, 208, 0.16);
+  --jersey-top: #86efac;
+  --jersey-bottom: #2f8d43;
+  --body-stroke: rgba(220, 252, 231, 0.42);
+}
+
+.player-token--selected::after {
+  content: "";
+  position: absolute;
+  inset: -14%;
+  border-radius: 999px;
+  border: max(2px, calc(var(--token-size) * 0.05)) solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.45);
+  pointer-events: none;
+}
+
+.player-token__ball circle {
+  fill: #f8fafc;
+  stroke: #020617;
+  stroke-width: 3;
+}
+
+.player-token__ball path {
+  fill: none;
+  stroke: #020617;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.player-token__warning-icon circle:first-child {
+  fill: #f97316;
+  stroke: #fff7ed;
+  stroke-width: 2;
+}
+
+.player-token__warning-icon path {
+  stroke: white;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
+.player-token__warning-icon circle:last-child {
+  fill: white;
+  stroke: none;
+}
+
+.player-token__target path {
+  fill: none;
+  stroke: #ff3b3b;
+  stroke-width: 5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.player-token__star-badge circle {
+  fill: #facc15;
+  stroke: #7c4b00;
+  stroke-width: 2;
+}
+
+.player-token__star-badge path {
+  fill: white;
+  stroke: #7c4b00;
+  stroke-width: 1.2;
+  stroke-linejoin: round;
+}
+
+.player-token__keeper-icon circle {
+  fill: #dcfce7;
+  stroke: #14532d;
+  stroke-width: 2;
+}
+
+.player-token__keeper-icon path {
+  fill: #14532d;
+}
+
+.player-token__stamina {
+  position: absolute;
+  left: 18%;
+  bottom: -3px;
+  height: max(2px, calc(var(--token-size) * 0.06));
+  border-radius: 999px;
+  background: #9ca3af;
+  box-shadow: 0 0 0 1px rgba(2, 8, 23, 0.72);
+}
+
+@keyframes playerTokenCarrierPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter:
+      drop-shadow(0 0 6px rgba(96, 165, 250, 0.58))
+      drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+  }
+  50% {
+    transform: scale(1.025);
+    filter:
+      drop-shadow(0 0 10px rgba(96, 165, 250, 0.78))
+      drop-shadow(0 0 5px rgba(34, 197, 94, 0.22))
+      drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+  }
+}
+
+@keyframes playerTokenOpenPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter:
+      drop-shadow(0 0 5px rgba(34, 197, 94, 0.62))
+      drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+  }
+  50% {
+    transform: scale(1.025);
+    filter:
+      drop-shadow(0 0 10px rgba(34, 197, 94, 0.88))
+      drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+  }
+}
+
+@keyframes playerTokenDangerPulse {
+  0%, 100% {
+    transform: scale(1);
+    filter:
+      drop-shadow(0 0 5px rgba(249, 115, 22, 0.68))
+      drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+  }
+  50% {
+    transform: scale(1.025);
+    filter:
+      drop-shadow(0 0 10px rgba(239, 68, 68, 0.86))
+      drop-shadow(0 2px 4px rgba(0, 0, 0, 0.34));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player-token,
+  .player-token--ballCarrier,
+  .player-token--open,
+  .player-token--underPressure {
+    animation: none;
+  }
+}
+
+
+/* Final gameplay readability pass */
+.player-token {
+  filter: drop-shadow(0 0 4px var(--team-glow)) drop-shadow(0 2px 3px rgba(0,0,0,.42));
+}
+.player-token__outer { stroke-width: 8.5; }
+.player-token__mid { fill: rgba(2, 8, 23, .92); stroke-width: 1.4; }
+.player-token__inner { stroke: rgba(255,255,255,.16); stroke-width: 1.2; }
+.player-token__body { opacity: .28; stroke-width: 1.1; }
+.player-token__neck { opacity: .55; }
+.player-token__label {
+  margin-top: -4%;
+  font-size: clamp(12px, calc(var(--token-size) * .38), 29px);
+  letter-spacing: -0.04em;
+  text-shadow: 0 2px 2px rgba(0,0,0,.95), 0 0 5px rgba(0,0,0,.9);
+}
+.player-token__role {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: 20%;
+  transform: translateX(-50%);
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(5px, calc(var(--token-size) * .13), 9px);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: .08em;
+  color: rgba(255,255,255,.64);
+  text-shadow: 0 1px 2px rgba(0,0,0,.9);
+  pointer-events: none;
+}
+.player-token--away {
+  --ring-top: #ffb0a8;
+  --ring-mid: #ff4d4d;
+  --ring-bottom: #b91c1c;
+  --jersey-top: #ff6a5f;
+  --jersey-bottom: #a31212;
+  --team-glow: rgba(255, 77, 77, .58);
+}
+.player-token--support {
+  --team-glow: rgba(34, 211, 238, .24);
+}
+.player-token--open {
+  --team-glow: rgba(34, 197, 94, .34);
+}
+.player-token--ballCarrier .player-token__outer { stroke-width: 9.5; }
+.player-token--selected .player-token__outer { stroke-width: 9; }
+.player-token--selected::after {
+  inset: -12%;
+  border-color: rgba(255,255,255,.72);
+  box-shadow: 0 0 12px rgba(255,255,255,.36);
+}
+@keyframes playerTokenOpenPulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 4px rgba(34,197,94,.42)) drop-shadow(0 2px 3px rgba(0,0,0,.38)); }
+  50% { transform: scale(1.012); filter: drop-shadow(0 0 7px rgba(34,197,94,.58)) drop-shadow(0 2px 3px rgba(0,0,0,.38)); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   EMOTIONAL STATE ENHANCEMENTS — phase-aware tokens with intention
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── Ball carrier: tight decision-aura rings — expressive not dominant ── */
+.player-token--ballCarrier::before {
+  content: "";
+  position: absolute;
+  inset: -9%;
+  border-radius: 999px;
+  border: 2px solid rgba(96,165,250,.70);
+  animation: carrierAura1 1.7s ease-in-out infinite;
+  pointer-events: none;
+}
+.player-token--ballCarrier::after {
+  content: "";
+  position: absolute;
+  inset: -20%;
+  border-radius: 999px;
+  border: 1.5px solid rgba(96,165,250,.36);
+  animation: carrierAura2 1.7s ease-in-out infinite 0.5s;
+  pointer-events: none;
+}
+@keyframes carrierAura1 {
+  0%,100% { opacity:.92; transform:scale(1);    }
+  50%      { opacity:.28; transform:scale(1.07); }
+}
+@keyframes carrierAura2 {
+  0%,100% { opacity:.48; transform:scale(1);    }
+  50%      { opacity:.08; transform:scale(1.10); }
+}
+
+/* Override to a more dramatic carrier pulse */
+@keyframes playerTokenCarrierPulse {
+  0%,100% {
+    transform: scale(1);
+    filter:
+      drop-shadow(0 0 9px  rgba(96,165,250,.75))
+      drop-shadow(0 0 20px rgba(96,165,250,.36))
+      drop-shadow(0 2px 4px rgba(0,0,0,.46));
+  }
+  50% {
+    transform: scale(1.036);
+    filter:
+      drop-shadow(0 0 16px rgba(96,165,250,.96))
+      drop-shadow(0 0 32px rgba(34,197,94,.32))
+      drop-shadow(0 2px 4px rgba(0,0,0,.46));
+  }
+}
+
+/* ── Open runner: tight ring ── */
+.player-token--open::before {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  border-radius: 999px;
+  border: 1.5px solid rgba(34,197,94,.58);
+  animation: openRing 1.25s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes openRing {
+  0%,100% { opacity:.85; transform:scale(1);    }
+  50%      { opacity:.22; transform:scale(1.10); }
+}
+@keyframes playerTokenOpenPulse {
+  0%,100% {
+    transform: scale(1);
+    filter:
+      drop-shadow(0 0 8px  rgba(34,197,94,.76))
+      drop-shadow(0 0 16px rgba(34,197,94,.38))
+      drop-shadow(0 2px 3px rgba(0,0,0,.42));
+  }
+  50% {
+    transform: scale(1.024);
+    filter:
+      drop-shadow(0 0 14px rgba(34,197,94,.96))
+      drop-shadow(0 0 26px rgba(34,197,94,.52))
+      drop-shadow(0 2px 3px rgba(0,0,0,.42));
+  }
+}
+
+/* ── Under pressure: fast panic double-ring ── */
+.player-token--underPressure::before {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  border-radius: 999px;
+  border: 2.5px solid rgba(239,68,68,.78);
+  animation: pressurePanic .55s ease-in-out infinite;
+  pointer-events: none;
+}
+.player-token--underPressure::after {
+  content: "";
+  position: absolute;
+  inset: -18%;
+  border-radius: 999px;
+  border: 1.5px solid rgba(239,68,68,.38);
+  animation: pressurePanic .55s ease-in-out infinite 0.28s;
+  pointer-events: none;
+}
+@keyframes pressurePanic {
+  0%,100% { opacity:1.0;  transform:scale(1);    }
+  50%      { opacity:.18; transform:scale(1.06); }
+}
+@keyframes playerTokenDangerPulse {
+  0%,100% {
+    transform: scale(1);
+    filter:
+      drop-shadow(0 0 8px  rgba(239,68,68,.85))
+      drop-shadow(0 0 16px rgba(239,68,68,.46))
+      drop-shadow(0 2px 4px rgba(0,0,0,.46));
+  }
+  50% {
+    transform: scale(1.038);
+    filter:
+      drop-shadow(0 0 15px rgba(239,68,68,1.0))
+      drop-shadow(0 0 28px rgba(239,68,68,.62))
+      drop-shadow(0 2px 4px rgba(0,0,0,.46));
+  }
+}
+
+/* ── Goalkeeper: permanent calm ring ── */
+.player-token--goalkeeper::before,
+.player-token--keeper-style::before {
+  content: "";
+  position: absolute;
+  inset: -8%;
+  border-radius: 999px;
+  border: 1.8px solid rgba(74,222,128,.54);
+  pointer-events: none;
+  animation: keeperRing 2.4s ease-in-out infinite;
+}
+@keyframes keeperRing {
+  0%,100% { opacity:.76; }
+  50%      { opacity:.32; }
+}
+
+/* ── Facing direction chevron styles ── */
+.player-token__facing path {
+  fill: rgba(255,255,255,.44);
+  stroke: none;
+}
+.player-token--away .player-token__facing path {
+  fill: rgba(255,165,165,.44);
+}
+.player-token--ballCarrier .player-token__facing path {
+  fill: rgba(147,197,253,.90);
+}
+.player-token--open .player-token__facing path {
+  fill: rgba(74,222,128,.84);
+}
+.player-token--underPressure .player-token__facing path {
+  fill: rgba(252,165,165,.76);
+}
+.player-token--goalkeeper .player-token__facing path,
+.player-token--keeper-style .player-token__facing path {
+  fill: rgba(134,239,172,.76);
+}
