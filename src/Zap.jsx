@@ -14,7 +14,7 @@ import { SplashScreen, CreateClubScreen, HomeScreen } from "./screens/HomeScreen
 import { PreMatchScreen, MatchFoundScreen }           from "./screens/MatchScreens.jsx";
 import { Leaderboard }                                from "./screens/Leaderboard.jsx";
 import GameScreen                                     from "./game/GameScreen.jsx";
-import TrainingMode                                  from "./screens/TrainingMode.jsx";
+import TrainingMode                                   from "./screens/TrainingMode.jsx";
 import {
   trackAppOpened, trackClubCreated, trackMatchStarted,
 } from "./lib/analytics.js";
@@ -24,6 +24,8 @@ import { Toast, TxPendingBadge }                      from "./ui/ui.jsx";
 const walletKey = (wallet) => String(wallet || "local").toLowerCase();
 const stateKey = (wallet) => `zapfc:s5:${walletKey(wallet)}`;
 const leaderboardKey = (wallet) => `zapfc:lb5:${walletKey(wallet)}`;
+const TRAINING_MODE_ENABLED = false;
+const BOOT_LOADING_MS = 3000;
 
 const loadProfile = (wallet) => {
   let s = normalizeState({ ...defS(), wallet: wallet || "local" });
@@ -40,17 +42,41 @@ const loadProfile = (wallet) => {
 };
 
 // ── Loading screen ─────────────────────────────────────────────────────────────
-function LoadingScreen() {
+function LoadingScreen({ label = "LOADING CLUBHOUSE" }) {
+  const [progress, setProgress] = useState(8);
+
+  useEffect(() => {
+    const start = performance.now();
+    const id = window.setInterval(() => {
+      const elapsed = performance.now() - start;
+      const eased = 1 - Math.pow(1 - Math.min(elapsed / 3200, 1), 3);
+      setProgress(Math.min(96, Math.round(8 + eased * 88)));
+    }, 120);
+    return () => window.clearInterval(id);
+  }, []);
+
   return (
-    <div style={{ position:"fixed", inset:0, background:"#020504", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"16px" }}>
+    <div style={{ position:"fixed", inset:0, zIndex:80, background:"#020504", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:"16px", overflow:"hidden" }}>
       <style>{GLOBAL_CSS}</style>
-      <div style={{ fontFamily:'"Bebas Neue",cursive', fontSize:"32px", letterSpacing:"6px", color:"#18c158", animation:"loadPulse 1.4s ease-in-out infinite" }}>ZAP</div>
-      <div style={{ display:"flex", gap:"6px" }}>
-        {[0,1,2].map(i => (
-          <div key={i} style={{ width:"5px", height:"5px", borderRadius:"50%", background:"#18c158", opacity:.6, animation:`loadPulse 1.2s ease-in-out ${i*0.2}s infinite` }}/>
-        ))}
+      <div style={{ position:"absolute", inset:0, background:"radial-gradient(ellipse 54% 38% at 50% 42%,rgba(24,193,88,.16),transparent 68%),linear-gradient(180deg,rgba(2,5,4,.7),#020504 82%)" }} />
+      <div style={{ position:"absolute", inset:0, opacity:.18, backgroundImage:"linear-gradient(rgba(255,255,255,.05) 1px,transparent 1px)", backgroundSize:"100% 18px", animation:"loadPulse 1.8s ease-in-out infinite" }} />
+
+      <div style={{ position:"relative", zIndex:1, width:"min(680px,calc(100vw - 40px))", textAlign:"center" }}>
+        <div style={{ fontFamily:"var(--f-cond)", fontSize:"clamp(18px,2.4vw,28px)", fontWeight:900, letterSpacing:".16em", color:"rgba(250,204,21,.88)", marginBottom:"12px", textTransform:"uppercase" }}>From the founder of Cipher</div>
+        <div style={{ fontFamily:"var(--f-cond)", fontSize:"clamp(15px,1.8vw,22px)", fontWeight:800, letterSpacing:".14em", color:"rgba(255,255,255,.58)", marginBottom:"22px", textTransform:"uppercase" }}>Winner of Dojo Hackathon</div>
+        <div style={{ fontFamily:"var(--f-disp)", fontSize:"clamp(118px,18vw,190px)", lineHeight:.78, letterSpacing:".05em", color:"#f8fff9", textShadow:"0 0 70px rgba(24,193,88,.32)" }}>ZAP</div>
+        <div style={{ fontFamily:"var(--f-cond)", fontSize:"clamp(18px,2.2vw,28px)", fontWeight:900, letterSpacing:".18em", color:"rgba(24,193,88,.72)", marginTop:"16px", textTransform:"uppercase" }}>A Decision Football Story</div>
+
+        <div style={{ margin:"44px auto 0", width:"min(480px,100%)" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"10px", fontFamily:"var(--f-mono)", fontSize:"10px", letterSpacing:".16em", color:"rgba(255,255,255,.58)" }}>
+            <span>{label}</span>
+            <span>{progress}%</span>
+          </div>
+          <div style={{ height:"11px", borderRadius:"999px", overflow:"hidden", background:"rgba(255,255,255,.1)", border:"1px solid rgba(255,255,255,.1)" }}>
+            <i style={{ display:"block", width:`${progress}%`, height:"100%", borderRadius:"inherit", background:"linear-gradient(90deg,#facc15,#22c55e,#38bdf8)", boxShadow:"0 0 22px rgba(34,197,94,.42)", transition:"width .18s ease" }} />
+          </div>
+        </div>
       </div>
-      <div style={{ fontFamily:'"IBM Plex Mono",monospace', fontSize:"8px", letterSpacing:".22em", color:"rgba(24,193,88,.38)" }}>DECISION FOOTBALL</div>
     </div>
   );
 }
@@ -144,14 +170,19 @@ export default function Zap() {
 
   // ── Bootstrap ────────────────────────────────────────────────────────────
   useEffect(() => {
+    let cancelled = false;
     (async () => {
+      const loadingHold = new Promise((resolve) => window.setTimeout(resolve, BOOT_LOADING_MS));
       const { s, lb } = loadProfile("local");
+      await loadingHold;
+      if (cancelled) return;
       setSelectedFId(s.formationId || "control-433");
       setS(s);
       setLB(lb);
       setScreen("splash");
       trackAppOpened();
     })();
+    return () => { cancelled = true; };
   }, []);
 
   const routeForWallet = useCallback((wallet) => {
@@ -159,10 +190,9 @@ export default function Zap() {
     setSelectedFId(s.formationId || "control-433");
     setS(s);
     setLB(lb);
-    // Route to training if first-time player hasn't done it yet
     if (!s.clubCreated) {
       setScreen("createClub");
-    } else if (!s.trainingDone) {
+    } else if (TRAINING_MODE_ENABLED && !s.trainingDone) {
       setScreen("training");
     } else {
       setScreen("home");
@@ -219,10 +249,11 @@ export default function Zap() {
       ...S,
       clubName:    formattedName,
       clubCreated: true,
+      trainingDone: TRAINING_MODE_ENABLED ? S?.trainingDone : true,
       wallet:      account?.address || address || "local",
     });
     setS(ns); saveS(ns);
-    setScreen(ns.trainingDone ? "home" : "training");
+    setScreen(TRAINING_MODE_ENABLED && !ns.trainingDone ? "training" : "home");
     showToast("⚽ Welcome, " + formattedName + "!");
     trackClubCreated();
 
@@ -307,6 +338,7 @@ export default function Zap() {
         {screen === "home" && (
           <HomeScreen
             S={S}
+            LB={LB}
             onKickOff={() => setScreen("prematch")}
             onLB={() => setScreen("lb")}
             onMarket={() => setMarket(true)}

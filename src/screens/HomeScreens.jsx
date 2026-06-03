@@ -1,6 +1,7 @@
 // ─── HomeScreens.jsx ─────────────────────────────────────────────────────────
 import { useState } from "react";
 import { StadiumEnvironment } from "../pitch/pitch.jsx";
+import { ranked, myRank } from "../game/gameState.js";
 import HomeStadiumBackdrop from "../ui/HomeStadiumBackdrop.jsx";
 import "./homeScreen.css";
 
@@ -270,7 +271,7 @@ function MiniFormation({ formationId = "control-433" }) {
 }
 
 // ── HomeScreen ─────────────────────────────────────────────────────────────────
-export function HomeScreen({ S, onKickOff, onLB, onMarket }) {
+export function HomeScreen({ S, LB = [], onKickOff, onLB, onMarket }) {
   const rep    = S?.rep    || 0;
   const coins  = S?.coins  || 0;
   const wins   = S?.wins   || 0;
@@ -283,6 +284,17 @@ export function HomeScreen({ S, onKickOff, onLB, onMarket }) {
   const initials = clubName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
   const form = (S?.recentResults || []).slice(-5);
   const FORM_COL = { W:"#22c55e", D:"#facc15", L:"#ef4444" };
+  const table = ranked(S, LB);
+  const rank = myRank(S, LB);
+  const leaders = table.slice(0, 4);
+  const nextTarget = table.find((team) => team.rank === Math.max(1, rank - 1));
+  const lastDelta = S?.lastDelta || 0;
+  const clubBase = clubName.replace(/\s+FC$/i, "");
+  const boosts = [
+    { label:"ATK", value:S?.atkBoost || 0 },
+    { label:"MID", value:S?.midBoost || 0 },
+    { label:"DEF", value:S?.defBoost || 0 },
+  ];
 
   const repLabel = rep >= 200
     ? "Elite status"
@@ -294,8 +306,22 @@ export function HomeScreen({ S, onKickOff, onLB, onMarket }) {
           ? "Pressure rising"
           : "Fresh save";
 
+  const highlights = [
+    { tag:"LIVE", text:`${clubBase} enter matchday ranked #${rank}` },
+    { tag:"TARGET", text:nextTarget ? `Catch ${nextTarget.name}` : "Protect first place" },
+    { tag:"MARKET", text:coins >= 40 ? "Squad move available" : "Coins needed" },
+  ];
+
   return (
     <HomeStadiumBackdrop>
+      <div className="home-rotate-gate">
+        <div>
+          <span>Portrait screen detected</span>
+          <strong>Rotate your phone</strong>
+          <p>ZAP needs a wider matchday view so the pitch, table, and controls stay clean.</p>
+        </div>
+      </div>
+
       <main className="home-ui">
         <header className="home-topbar">
           <div className="home-club-chip">
@@ -306,95 +332,151 @@ export function HomeScreen({ S, onKickOff, onLB, onMarket }) {
             </div>
           </div>
 
-          <div className="home-coin-pill">
-            <strong>{coins}</strong>
-            <span>COINS</span>
+          <div className="home-topbar__right">
+            <div className="home-rank-pill">
+              <strong>#{rank}</strong>
+              <span>TABLE</span>
+            </div>
+            <div className="home-coin-pill">
+              <strong>{coins}</strong>
+              <span>COINS</span>
+            </div>
           </div>
         </header>
 
         <section className="home-layout">
-          <article className="home-hero home-glass-card">
-            <div className="home-hero__pitch-lines" />
-            <MiniFormation formationId={S?.formationId} />
-            <div className="home-hero__copy">
-              <span className="home-eyebrow">MATCHDAY READY</span>
-              <h1>
-                TAKE THE
-                <b>NEXT RESULT</b>
-              </h1>
-              <p>Read the game, make the call, and push your club up the table.</p>
-              <p className="home-opponent-line">Iron Gate FC. They sit deep and hit on the break.</p>
+          <aside className="home-command-panel home-glass-card">
+            <div className="home-command-panel__headline">
+              <span className="home-eyebrow">MATCHDAY CONTROL</span>
+              <h1>{clubBase}</h1>
+              <p>{repLabel}</p>
             </div>
-            <div className="home-hero__actions">
-              <button onClick={onKickOff} className="home-primary-btn">Kick Off</button>
-              <button onClick={onLB} className="home-secondary-btn">Table</button>
-            </div>
-          </article>
 
-          <aside className="home-pulse-card home-glass-card">
-            <span className="home-eyebrow">CLUB PULSE</span>
-            <h3>{repLabel}</h3>
-            <div className="home-pulse-meter">
-              {[0,1,2,3,4].map(i => (
-                <i key={i} className={i < Math.ceil(pct / 20) ? "" : "is-dim"} />
-              ))}
-            </div>
-            <p>Reputation {rep}</p>
-          </aside>
-
-          <section className="home-stats-strip home-glass-card">
-            <div className="home-stat-tile">
-              <span>Played</span>
-              <strong>{played}</strong>
-            </div>
-            <div className="home-stat-tile">
-              <span>Won</span>
-              <strong className="is-green">{wins}</strong>
-            </div>
-            <div className="home-stat-tile">
-              <span>Drawn</span>
-              <strong className="is-yellow">{draws}</strong>
-            </div>
-            <div className="home-stat-tile">
-              <span>Lost</span>
-              <strong className="is-red">{losses}</strong>
-            </div>
-            <div className="home-form-guide">
-              <span>Form</span>
+            <div className="home-command-stats">
               <div>
-                {(form.length ? form : ["W", "D", "L", "W", "W"]).map((r, i) => (
-                  <b key={`${r}-${i}`} style={{ background: FORM_COL[r] || "rgba(255,255,255,.14)" }}>{r}</b>
-                ))}
+                <span>Rank</span>
+                <strong>#{rank}</strong>
+              </div>
+              <div>
+                <span>Rep</span>
+                <strong>{rep}</strong>
+              </div>
+              <div>
+                <span>Coins</span>
+                <strong>{coins}</strong>
               </div>
             </div>
-          </section>
 
-          <article className="home-rep-card home-glass-card" style={{ "--rep-color": repCol, "--rep-width": `${pct}%` }}>
-            <div>
-              <span className="home-eyebrow">REPUTATION</span>
-              <h3>{repLabel}</h3>
+            <div className="home-boost-row">
+              {boosts.map((item) => (
+                <div key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value >= 0 ? `+${item.value}` : item.value}</strong>
+                </div>
+              ))}
             </div>
-            <strong>{rep}</strong>
-            <div className="home-rep-track"><i /></div>
+
+            <div className="home-rep-card" style={{ "--rep-color": repCol, "--rep-width": `${pct}%` }}>
+              <div className="home-panel-head">
+                <span className="home-eyebrow">CLUB PULSE</span>
+                <strong>{rep}</strong>
+              </div>
+              <div className="home-rep-track"><i /></div>
+            </div>
+          </aside>
+
+          <article className="home-broadcast home-glass-card">
+            <div className="home-broadcast__top">
+              <div>
+                <span className="home-eyebrow">LIVE TACTICAL FEED</span>
+                <strong>{nextTarget ? `Next chase: ${nextTarget.name}` : "Top of the table"}</strong>
+              </div>
+              <b>ON AIR</b>
+            </div>
+
+            <div className="home-feed-screen">
+              <div className="home-feed-screen__pitch" />
+                <MiniFormation formationId={S?.formationId} />
+              <div className="home-feed-screen__scan" />
+            </div>
+
+            <div className="home-broadcast__bottom">
+              <div className="home-highlight-strip">
+                {highlights.map((item) => (
+                  <div key={item.tag}>
+                    <span>{item.tag}</span>
+                    <strong>{item.text}</strong>
+                  </div>
+                ))}
+              </div>
+              <button onClick={onKickOff} className="home-kickoff-btn">
+                <span>Kick Off</span>
+                <b>Start Match</b>
+              </button>
+            </div>
           </article>
 
-          <button onClick={onMarket} className="home-action-card home-action-card--market home-glass-card">
-            <div>
-              <span className="home-eyebrow">SQUAD MARKET</span>
-              <strong>Upgrade Your XI</strong>
-              <p>Find better players and shape the next result before kickoff.</p>
-            </div>
-            <b>→</b>
-          </button>
+          <aside className="home-side-stack">
+            <section className="home-table-panel home-glass-card">
+              <div className="home-panel-head">
+                <span className="home-eyebrow">LEADERBOARD</span>
+                <button onClick={onLB}>Table</button>
+              </div>
+              <div className="home-leaders">
+                {leaders.map((team) => (
+                  <div key={`${team.id}-${team.name}`} className={team.cpu ? "" : "is-you"}>
+                    <span>#{team.rank}</span>
+                    <strong>{team.name}</strong>
+                    <b>{team.pts}</b>
+                  </div>
+                ))}
+              </div>
+              <div className="home-table-note">
+                {lastDelta > 0 ? `+${lastDelta} last result` : lastDelta < 0 ? `${lastDelta} last result` : "No recent movement"}
+              </div>
+            </section>
 
-          <button onClick={onLB} className="home-action-card home-action-card--table home-glass-card">
-            <div>
-              <span className="home-eyebrow">LEAGUE TABLE</span>
-              <strong>Check The Race</strong>
-              <p>See who is above you, who is chasing, and where momentum matters.</p>
+            <section className="home-stats-strip home-glass-card">
+              <div className="home-stat-tile">
+                <span>P</span>
+                <strong>{played}</strong>
+              </div>
+              <div className="home-stat-tile">
+                <span>W</span>
+                <strong className="is-green">{wins}</strong>
+              </div>
+              <div className="home-stat-tile">
+                <span>D</span>
+                <strong className="is-yellow">{draws}</strong>
+              </div>
+              <div className="home-stat-tile">
+                <span>L</span>
+                <strong className="is-red">{losses}</strong>
+              </div>
+              <div className="home-form-guide">
+                <span>Form</span>
+                <div>
+                  {(form.length ? form : ["W", "D", "L", "W", "W"]).map((r, i) => (
+                    <b key={`${r}-${i}`} style={{ background: FORM_COL[r] || "rgba(255,255,255,.14)" }}>{r}</b>
+                  ))}
+                </div>
+              </div>
+            </section>
+
+            <div className="home-action-row">
+              <button onClick={onMarket} className="home-action-card home-action-card--market home-glass-card">
+                <span>Market</span>
+                <strong>Upgrade XI</strong>
+                <b>+</b>
+              </button>
+
+              <button onClick={onLB} className="home-action-card home-action-card--table home-glass-card">
+                <span>Table</span>
+                <strong>Race</strong>
+                <b>#</b>
+              </button>
             </div>
-            <b>↗</b>
-          </button>
+          </aside>
         </section>
       </main>
     </HomeStadiumBackdrop>
