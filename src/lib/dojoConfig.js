@@ -1,5 +1,5 @@
-import manifestDev from "../../../contracts/manifest_dev.json";
-import manifestSepolia from "../../../contracts/manifest_sepolia.json";
+import manifestDev from "./manifest_dev.json";
+import manifestSepolia from "./manifest_sepolia.json";
 
 const env = import.meta.env || {};
 const CHAIN_PROFILE = (env.VITE_CHAIN_PROFILE || env.VITE_CHAIN || "katana").toLowerCase();
