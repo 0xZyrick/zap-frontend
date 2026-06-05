@@ -116,8 +116,7 @@ export async function getPlayerRegistry(walletAddress) {
 
     const node = payload?.data?.dojoStarterPlayerRegistryModels?.edges?.[0]?.node || null;
     return node ? { ...node, clubName: decodeFeltString(node.club_name) } : null;
-  } catch (e) {
-    console.warn("[getPlayerRegistry] Unable to read player registry:", e?.message || e);
+  } catch {
     return null;
   }
 }
@@ -190,8 +189,7 @@ export async function getSession(provider, sessionId) {
       statsPacked:  Number(result[4]),
       vrfRequestId: BigInt(result[5]),
     };
-  } catch (e) {
-    console.error("getSession failed:", e);
+  } catch {
     return null;
   }
 }
@@ -258,7 +256,6 @@ export async function registerPlayer(account, clubName) {
     });
   } catch (e) {
     if (isAlreadyRegisteredError(e)) {
-      console.info("[registerPlayer] Player already registered, continuing.");
       return { alreadyRegistered: true };
     }
     throw e;
@@ -304,30 +301,21 @@ export async function unequipStarter(account, role) {
  * For dev simplicity we parse the tx receipt.
  */
 export async function startGame(account, provider, cpuIdx = 3) {
-  console.log("[startGame] Initiating with cpuIdx:", cpuIdx);
   if (!account) throw new Error("No account for startGame");
   if (!provider) throw new Error("No provider for startGame");
   
-  try {
-    const afterSessionId = rememberedSessionId();
-    const tx = await account.execute({
-      contractAddress: CONTRACTS.game_actions,
-      entrypoint: "start_game",
-      calldata: [String(cpuIdx)],
-    });
-    console.log("[startGame] TX submitted:", tx.transaction_hash);
+  const afterSessionId = rememberedSessionId();
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.game_actions,
+    entrypoint: "start_game",
+    calldata: [String(cpuIdx)],
+  });
 
-    const receipt = await waitForTx(provider, tx.transaction_hash);
-    console.log("[startGame] Receipt received, parsing session ID...");
-    const sessionId = await findLatestSessionId(provider, account.address, receipt, { afterSessionId });
-    console.log("[startGame] Session ID found:", sessionId);
+  const receipt = await waitForTx(provider, tx.transaction_hash);
+  const sessionId = await findLatestSessionId(provider, account.address, receipt, { afterSessionId });
 
-    if (!sessionId) throw new Error("Failed to extract session ID from transaction");
-    return { txHash: tx.transaction_hash, sessionId };
-  } catch (e) {
-    console.error("[startGame] Failed:", e?.message || e);
-    throw e;
-  }
+  if (!sessionId) throw new Error("Failed to extract session ID from transaction");
+  return { txHash: tx.transaction_hash, sessionId };
 }
 
 /**
@@ -336,25 +324,17 @@ export async function startGame(account, provider, cpuIdx = 3) {
  * seed: random u128 as string
  */
 export async function devResolveTurn(account, sessionId, actionIdx, seed) {
-  console.log("[devResolveTurn] Submitting:", { sessionId: sessionId.toString(), actionIdx, seed: seed.toString() });
   if (!account) throw new Error("No account for devResolveTurn");
   
-  try {
-    const result = await account.execute({
-      contractAddress: CONTRACTS.game_actions,
-      entrypoint: "dev_resolve_turn",
-      calldata: [
-        String(sessionId),
-        String(actionIdx),
-        String(seed),
-      ],
-    });
-    console.log("[devResolveTurn] Success:", result.transaction_hash);
-    return result;
-  } catch (e) {
-    console.error("[devResolveTurn] Failed:", e?.message || e);
-    throw e;
-  }
+  return account.execute({
+    contractAddress: CONTRACTS.game_actions,
+    entrypoint: "dev_resolve_turn",
+    calldata: [
+      String(sessionId),
+      String(actionIdx),
+      String(seed),
+    ],
+  });
 }
 
 /** Production turn resolver. Stores the action, then VRF resolves asynchronously. */

@@ -48,7 +48,6 @@ export function useDojoGame(account, provider) {
     } catch (e) {
       const msg = e?.message || String(e);
       setTxError(msg);
-      console.error("TX failed:", msg);
       throw e;
     } finally {
       setTxPending(false);
@@ -107,9 +106,7 @@ export function useDojoGame(account, provider) {
     const sessionId = sessionIdRef.current;
     if (!sessionId) throw new Error("No active session");
 
-    console.log("[doResolveTurn] Starting turn resolution", { sessionId, actionIdx, provider: !!provider });
     const before = await getSession(provider, sessionId);
-    console.log("[doResolveTurn] Before state:", before);
 
     let devSeed = null;
     let cpuAction = null;
@@ -117,23 +114,17 @@ export function useDojoGame(account, provider) {
       // Generate a pseudo-random seed for hosted/local Katana dev worlds.
       devSeed = BigInt(Math.floor(Math.random() * Number.MAX_SAFE_INTEGER));
       cpuAction = Number(devSeed % 3n);
-      console.log("[doResolveTurn] Submitting dev_resolve_turn", { sessionId, actionIdx, seed: devSeed.toString() });
       await exec(devResolveTurn, sessionId, actionIdx, devSeed);
     } else {
-      console.log("[doResolveTurn] Submitting submit_turn_action", { sessionId, actionIdx });
       await exec(submitTurnAction, sessionId, actionIdx);
     }
 
     // Read back updated state from chain
-    console.log("[doResolveTurn] Waiting for session resolution...");
     const session = USE_DEV_RESOLVE
       ? await getSession(provider, sessionId)
       : await waitForSessionResolution(provider, sessionId, before);
     
-    if (!session) {
-      console.error("[doResolveTurn] Failed to read session after turn");
-      return null;
-    }
+    if (!session) return null;
 
     const unpacked = unpackState(session.state);
     const stats = unpackStats(session.statsPacked);
@@ -153,8 +144,6 @@ export function useDojoGame(account, provider) {
     else if (conceded) outcome = "concede";
     else if (prevPhase === "ATTACK" && !success) outcome = "miss";
     else if (prevPhase === "MIDFIELD") outcome = success ? "attack" : "defend";
-
-    console.log("[doResolveTurn] Turn resolved", { outcome, success, goalScored, conceded, newPhase: unpacked.currentPhase, cpuAction });
 
     return {
       ...unpacked,

@@ -212,16 +212,11 @@ export default function Zap() {
   const handleEnter = useCallback(async () => {
     setEntering(true);
     try {
-      console.log("[handleEnter] Initiating enter flow...", { account: !!account, provider: !!provider });
-      
       // Attempt connection if not already connected
       if (!account || !provider) {
-        console.log("[handleEnter] Calling connect()...");
         try {
           await connect();
-          console.log("[handleEnter] Connect succeeded");
-        } catch (e) {
-          console.error("[handleEnter] Connect failed:", e?.message || e);
+        } catch {
           showToast("Wallet connection failed. Please try again.");
           setEntering(false);
           return;
@@ -229,14 +224,10 @@ export default function Zap() {
       }
       
       if (account && provider) {
-        console.log("[handleEnter] Routing with active wallet...");
         routeForWallet(account.address || address);
         setEntering(false);
-      } else {
-        console.log("[handleEnter] Waiting for wallet state before routing...");
       }
-    } catch (e) {
-      console.error("[handleEnter] Unexpected error:", e?.message || e);
+    } catch {
       showToast("Error entering clubhouse");
       setEntering(false);
     }
@@ -266,9 +257,8 @@ export default function Zap() {
           if (result?.registry) {
             showToast("Using existing on-chain club: " + formatClubName(result.registry.clubName));
           }
-        } catch (e) {
-          if (!e?.message?.includes("Already registered"))
-            console.warn("registerPlayer:", e?.message);
+        } catch {
+          // Non-blocking: club creation should continue even if registration is unavailable.
         }
       })();
     }
@@ -285,8 +275,8 @@ export default function Zap() {
         await ensureRegistered(ns.clubName || "ZAP", ns);
         const feltId = FORMATION_FELT[selectedFId];
         if (feltId) await dojo.doSetFormation(feltId);
-      } catch (e) {
-        console.warn("pre-match chain setup:", e?.message);
+      } catch {
+        // Non-blocking: match can still run with client fallback if chain setup is unavailable.
       }
     }
     const fShape = FORMATIONS.find(x => x.id === selectedFId)?.shape || selectedFId;

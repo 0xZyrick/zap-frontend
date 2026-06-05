@@ -38,8 +38,8 @@ export function ConnectButton({ onConnected, onDisconnected }) {
     if (controllerConnector) {
       try {
         await connectAsync({ connector: controllerConnector });
-      } catch (e) {
-        console.error("Connection failed:", e);
+      } catch {
+        // Connection failures are surfaced by the wallet/controller UI.
       }
     }
   };

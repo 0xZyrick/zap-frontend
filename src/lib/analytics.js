@@ -85,8 +85,7 @@ const loadPostHog = () => {
               resolve(ph);
             },
           });
-        } catch (e) {
-          console.warn("[ZAP analytics] PostHog init failed:", e.message);
+        } catch {
           resolve(null);
         }
       };
@@ -103,10 +102,6 @@ const loadPostHog = () => {
 // ── Core capture fn ───────────────────────────────────────────────────────────
 const capture = async (event, props = {}) => {
   if (!ENABLED) {
-    // Dev mode: log to console so you can see events during development
-    if (import.meta?.env?.DEV) {
-      console.log(`[ZAP analytics] ${event}`, props);
-    }
     return;
   }
 
@@ -119,9 +114,8 @@ const capture = async (event, props = {}) => {
       device_id:   getDeviceId(),
       ts:          Date.now(),
     });
-  } catch (e) {
+  } catch {
     // Never throw — analytics must never break the game
-    console.warn("[ZAP analytics] capture failed:", e.message);
   }
 };
 

@@ -250,9 +250,8 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
     try {
       const result = await dojo.doStartGame(cpuIdx);
-      console.log("✅ Game started on-chain with session:", result?.sessionId?.toString());
-    } catch (e) {
-      console.error("❌ Failed to start game on-chain:", e.message);
+      if (!result?.sessionId) throw new Error("No on-chain session id was returned");
+    } catch {
       setChainFailed(true);
       showToast("⚠️ Blockchain connection issue — gameplay active client-side");
     } finally {
@@ -418,8 +417,6 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     };
 
     const buildChainTurnResult = async () => {
-      console.log("[buildChainTurnResult] Starting turn resolution...", { dojo: !!dojo, account: !!account, provider: !!provider });
-      
       if (!dojo) throw new Error("Dojo not initialized");
       if (!account) throw new Error("Account not connected");
       if (!provider) throw new Error("Provider not initialized");
@@ -428,11 +425,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       const intentId = context.availableIntents?.[idx] || null;
       const route = getIntentRoute(prevPhase, context, intentId);
       
-      console.log("[buildChainTurnResult] Submitting turn action...", { idx, prevPhase });
       const chainResult = await dojo.doResolveTurn(idx, prevScoreH, prevScoreA, prevPhase);
       
       if (!chainResult) throw new Error("Turn resolution returned empty");
-      console.log("[buildChainTurnResult] Chain result received:", chainResult);
 
       const phaseMap = { 0: "MIDFIELD", 1: "ATTACK", 2: "DEFEND" };
       const nextGs = phaseMap[chainResult.currentPhase] || "MIDFIELD";
@@ -521,7 +516,6 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       if (dojo && account && provider && !chainFailed) {
         turnResult = await buildChainTurnResult();
       } else {
-        console.warn("Blockchain not available, resolving turn client-side");
         turnResult = buildLocalTurnResult();
       }
 
@@ -573,7 +567,6 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       setPendingTurn({ turnResult, prevPhase });
 
     } catch (e) {
-      console.error("[GameScreen] Turn resolution failed:", { message: e?.message, error: e });
       setCpuChoice(null);
       setSelectedRate(null);
       setSelectedOutcome(null);
@@ -645,9 +638,8 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     if (dojo && account) {
       try {
         await dojo.doClaimReward();
-        console.log("Reward claimed on-chain");
-      } catch (e) {
-        console.warn("claimReward failed:", e.message);
+      } catch {
+        // Non-blocking: local rewards screen still reflects the completed match.
       }
     }
 
@@ -1122,9 +1114,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
               if (dojo && account) {
                 try {
                   await dojo.doContinueHalftime();
-                  console.log("✅ Continued to second half on-chain");
                 } catch (e) {
-                  console.error("❌ continueHalftime failed:", e.message);
                   showToast("⚠️ Blockchain error: " + e.message);
                   halftimeContinueRef.current = false;
                   return;

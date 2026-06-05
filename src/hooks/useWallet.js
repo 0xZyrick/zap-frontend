@@ -11,16 +11,6 @@ export function useWallet() {
 
   const connector = useMemo(() => connectors.find((c) => c.id?.includes("controller")), [connectors]);
 
-  // Log wallet setup on initialization
-  useMemo(() => {
-    console.log("[useWallet] Initialized:", {
-      mode: USE_CARTRIDGE ? "Cartridge" : "Dev",
-      hasConnector: !!connector,
-      isConnected,
-      account: starknetAccount?.address?.slice(0, 8),
-    });
-  }, [USE_CARTRIDGE, connector, isConnected, starknetAccount]);
-
   const connect_wallet = async () => {
     // Dev mode — return prefunded Katana account directly, no Controller needed
     if (!USE_CARTRIDGE) {
@@ -30,20 +20,13 @@ export function useWallet() {
       return { account: starknetAccount, provider: starknetProvider, address };
     }
     if (!connector) throw new Error("No Cartridge Controller connector available");
-    try {
-      console.log("[useWallet] Initiating Cartridge Controller connection...");
-      const result = await connectAsync({ connector });
-      console.log("[useWallet] Cartridge Controller connected");
-      return {
-        connected: true,
-        account: result?.account || starknetAccount,
-        provider: starknetProvider,
-        address: result?.account || address,
-      };
-    } catch (e) {
-      console.error("[useWallet] Wallet connection failed:", e);
-      throw e;
-    }
+    const result = await connectAsync({ connector });
+    return {
+      connected: true,
+      account: result?.account || starknetAccount,
+      provider: starknetProvider,
+      address: result?.account || address,
+    };
   };
 
   // In dev mode expose the dev account directly
