@@ -4,9 +4,10 @@
 
 import { useState, useEffect, useRef } from "react";
 import { ranked } from "../game/gameState.js";
-import { getRewardParticles } from "../game/gameLogic.js";
 import { pick } from "../game/gameLogic.js";
 import { HT_TALK } from "../game/constants.js";
+
+const COIN_ICON = "/assets/icons/coin.png";
 
 // ─── HalfTime ────────────────────────────────────────────────────────────────
 
@@ -163,34 +164,20 @@ export function DramaticLeaderboard({ S, LB, prevRank, newRank }) {
 
 // ─── FullTime ─────────────────────────────────────────────────────────────────
 
-export function FullTime({ data, S, LB, opponentName = "RIVALS FC", onAgain, onHome }) {
-  const { h, a, win, draw, delta, bd, prevRank, newRank, prevTier, newTier, matchStats } = data;
+export function FullTime({ data, S, opponentName = "RIVALS FC", onAgain, onHome, onExtraTime }) {
+  const { h, a, win, draw } = data;
   const rl  = win ? "VICTORY" : draw ? "DRAW" : "DEFEAT";
   const rc  = win ? "#4ade80" : draw ? "#d4a017" : "#f87171";
-  const sign= delta >= 0 ? "+" : "";
-  const sr  = bd.find(b => b.l?.includes("STREAK"));
-  const rankMove = prevRank - newRank;
   const decisionLine = win
     ? "Your decisions created enough pressure to finish the match."
     : draw
       ? "The match stayed balanced. The next tactical edge decides this fixture."
-      : "The key moments went against you. Strengthen the weak phase before the rematch.";
-  const stats = matchStats || { shots_h:0, shots_a:0, saves_h:0, saves_a:0, attacks_h:0, attacks_a:0 };
-  const matchRows = [
-    { lbl:"Shots", h:stats.shots_h, a:stats.shots_a },
-    { lbl:"Attacks", h:stats.attacks_h, a:stats.attacks_a },
-    { lbl:"Saves", h:stats.saves_h, a:stats.saves_a },
-  ];
-
-  // Coin display — re-derive from breakdown data
-  const coinEarned = win
-    ? 18 + h * 3 + (a === 0 ? 5 : 0)
-    : draw ? 8 : 4;
+      : "The key moments went against you. Regroup from the clubhouse.";
 
   return (
     <div style={{
-      position:"absolute", inset:0, zIndex:90, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-start",
-      padding:"12px",
+      position:"absolute", inset:0, zIndex:90, display:"flex", alignItems:"center", justifyContent:"center",
+      padding:"16px",
       background:win
         ? "linear-gradient(rgba(2,6,4,.68),rgba(2,6,4,.72)),radial-gradient(ellipse 90% 70% at 50% 20%,rgba(22,101,52,.48),rgba(3,7,5,.99) 72%)"
         : draw
@@ -200,101 +187,36 @@ export function FullTime({ data, S, LB, opponentName = "RIVALS FC", onAgain, onH
       animation:"flashIn .4s ease", boxSizing:"border-box",
     }}>
       <div style={{ position:"fixed", inset:0, pointerEvents:"none", opacity:.22, background:"repeating-linear-gradient(90deg,rgba(255,255,255,.08) 0 1px,transparent 1px 18px),linear-gradient(180deg,transparent 0 49%,rgba(255,255,255,.08) 50%,transparent 51%)" }}/>
-      
-      {/* Scrollable content container */}
-      <div style={{ width:"min(780px,100%)", maxHeight:"calc(100vh - 24px)", display:"flex", flexDirection:"column", overflow:"hidden", borderRadius:"18px", border:"1px solid rgba(255,255,255,.16)", background:"rgba(4,10,7,.96)", boxShadow:"0 30px 90px rgba(0,0,0,.62)" }}>
-        
-        {/* Hero banner - STICKY at top */}
-        <div style={{ flexShrink:0, borderBottom:"1px solid rgba(255,255,255,.12)", overflow:"hidden" }}>
-          <div style={{ padding:"9px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid rgba(255,255,255,.08)", background:"rgba(255,255,255,.04)" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-              <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:rc, boxShadow:`0 0 14px ${rc}` }}/>
-              <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".26em", color:"var(--tx3)" }}>FINAL WHISTLE</div>
-            </div>
-            <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".18em", color:rc }}>MATCH COMPLETE</div>
+      <div style={{ width:"min(620px,100%)", overflow:"hidden", borderRadius:"18px", border:"1px solid rgba(255,255,255,.16)", background:"rgba(4,10,7,.96)", boxShadow:"0 30px 90px rgba(0,0,0,.62)" }}>
+        <div style={{ padding:"10px 14px", display:"flex", justifyContent:"space-between", alignItems:"center", borderBottom:"1px solid rgba(255,255,255,.08)", background:"rgba(255,255,255,.04)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
+            <span style={{ width:"8px", height:"8px", borderRadius:"50%", background:rc, boxShadow:`0 0 14px ${rc}` }}/>
+            <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".26em", color:"var(--tx3)" }}>FINAL WHISTLE</div>
           </div>
-          <div style={{ padding:"14px 16px", background:win?"linear-gradient(180deg,rgba(22,101,52,.34),transparent 100%)":draw?"linear-gradient(180deg,rgba(92,71,0,.28),transparent 100%)":"linear-gradient(180deg,rgba(127,29,29,.34),transparent 100%)" }}>
-            <div style={{ fontFamily:"var(--f-disp)", fontSize:"clamp(44px,7vw,72px)", letterSpacing:"6px", color:rc, lineHeight:.85, textShadow:`0 0 44px ${rc}55` }}>{rl}</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:"10px", alignItems:"center", marginTop:"10px" }}>
-              <div style={{ textAlign:"right" }}>
-                <div style={{ fontFamily:"var(--f-cond)", fontWeight:800, fontSize:"14px", color:"var(--green)", lineHeight:1 }}>{S.clubName || "ZAP"}</div>
-                <div style={{ fontFamily:"var(--f-mono)", fontSize:"6.5px", letterSpacing:".16em", color:"var(--tx3)", marginTop:"2px" }}>HOME</div>
-              </div>
-              <div style={{ borderRadius:"12px", border:`1px solid ${rc}75`, background:"linear-gradient(180deg,rgba(255,255,255,.11),rgba(255,255,255,.04))", boxShadow:`0 0 40px ${rc}30`, padding:"8px 14px 6px", minWidth:"140px" }}>
-                <div style={{ fontFamily:"var(--f-disp)", fontSize:"56px", letterSpacing:"5px", lineHeight:.75, color:"var(--tx)" }}>{h}–{a}</div>
-              </div>
-              <div style={{ textAlign:"left" }}>
-                <div style={{ fontFamily:"var(--f-cond)", fontWeight:800, fontSize:"14px", color:"var(--tx2)", lineHeight:1 }}>{opponentName}</div>
-                <div style={{ fontFamily:"var(--f-mono)", fontSize:"6.5px", letterSpacing:".16em", color:"var(--tx3)", marginTop:"2px" }}>AWAY</div>
-              </div>
+          <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".18em", color:rc }}>MATCH COMPLETE</div>
+        </div>
+        <div style={{ padding:"22px 18px 18px", textAlign:"center", background:win?"linear-gradient(180deg,rgba(22,101,52,.3),transparent 100%)":draw?"linear-gradient(180deg,rgba(92,71,0,.24),transparent 100%)":"linear-gradient(180deg,rgba(127,29,29,.3),transparent 100%)" }}>
+          <div style={{ fontFamily:"var(--f-disp)", fontSize:"clamp(54px,9vw,86px)", letterSpacing:"6px", color:rc, lineHeight:.82, textShadow:`0 0 44px ${rc}55` }}>{rl}</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:"10px", alignItems:"center", marginTop:"16px" }}>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontFamily:"var(--f-cond)", fontWeight:800, fontSize:"15px", color:"var(--green)", lineHeight:1 }}>{S.clubName || "ZAP"}</div>
+              <div style={{ fontFamily:"var(--f-mono)", fontSize:"6.5px", letterSpacing:".16em", color:"var(--tx3)", marginTop:"3px" }}>HOME</div>
+            </div>
+            <div style={{ borderRadius:"12px", border:`1px solid ${rc}75`, background:"linear-gradient(180deg,rgba(255,255,255,.11),rgba(255,255,255,.04))", boxShadow:`0 0 40px ${rc}30`, padding:"9px 16px 7px", minWidth:"148px" }}>
+              <div style={{ fontFamily:"var(--f-disp)", fontSize:"60px", letterSpacing:"5px", lineHeight:.75, color:"var(--tx)" }}>{h}–{a}</div>
+            </div>
+            <div style={{ textAlign:"left" }}>
+              <div style={{ fontFamily:"var(--f-cond)", fontWeight:800, fontSize:"15px", color:"var(--tx2)", lineHeight:1 }}>{opponentName}</div>
+              <div style={{ fontFamily:"var(--f-mono)", fontSize:"6.5px", letterSpacing:".16em", color:"var(--tx3)", marginTop:"3px" }}>AWAY</div>
             </div>
           </div>
         </div>
-
-        {/* Scrollable content area */}
-        <div style={{ flex:1, overflowY:"auto", scrollbarWidth:"none", padding:"12px", boxSizing:"border-box" }}>
-          <div style={{ display:"flex", flexDirection:"column", gap:"10px" }}>
-            {sr && <div style={{ background:"rgba(212,160,23,.09)", border:"1px solid rgba(212,160,23,.25)", borderRadius:"10px", padding:"7px 14px", fontFamily:"var(--f-disp)", fontSize:"15px", letterSpacing:"2px", color:"#d4a017", animation:"streakPop .5s ease", marginBottom:"12px", textAlign:"center" }}>{sr.l}</div>}
-
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"8px", marginBottom:"10px" }}>
-              {matchRows.map(row => (
-                <div key={row.lbl} style={{ borderRadius:"12px", background:"rgba(255,255,255,.035)", border:"1px solid rgba(255,255,255,.07)", padding:"9px 10px", textAlign:"center" }}>
-                  <div style={{ display:"flex", alignItems:"baseline", justifyContent:"center", gap:"7px" }}>
-                    <span style={{ fontFamily:"var(--f-disp)", fontSize:"22px", color:"var(--green)", lineHeight:1 }}>{row.h}</span>
-                    <span style={{ fontFamily:"var(--f-mono)", fontSize:"7px", color:"var(--tx3)" }}>-</span>
-                    <span style={{ fontFamily:"var(--f-disp)", fontSize:"22px", color:"rgba(248,113,113,.82)", lineHeight:1 }}>{row.a}</span>
-                  </div>
-                  <div style={{ fontFamily:"var(--f-mono)", fontSize:"6.5px", letterSpacing:".16em", color:"var(--tx3)", marginTop:"4px" }}>{row.lbl.toUpperCase()}</div>
-                </div>
-              ))}
-            </div>
-
-            {/* Rep + coin delta */}
-            <div style={{ background:"rgba(255,255,255,.04)", border:"1px solid rgba(255,255,255,.08)", borderRadius:"14px", padding:"12px", marginBottom:"10px", textAlign:"center" }}>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:"10px", justifyContent:"center", marginBottom:"6px" }}>
-                <div style={{ flex:1, padding:"8px", borderRadius:"8px", background:"rgba(24,193,88,.06)", border:"1px solid rgba(24,193,88,.1)" }}>
-                  <div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", letterSpacing:".16em", color:"rgba(24,193,88,.6)", marginBottom:"2px" }}>REPUTATION</div>
-                  <div style={{ fontFamily:"var(--f-disp)", fontSize:"28px", letterSpacing:"-1px", color:delta>=0?"#4ade80":"#f87171", lineHeight:1 }}>{sign}{delta}</div>
-                </div>
-                <div style={{ flex:1, padding:"8px", borderRadius:"8px", background:"rgba(212,160,23,.06)", border:"1px solid rgba(212,160,23,.1)" }}>
-                  <div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", letterSpacing:".16em", color:"rgba(212,160,23,.6)", marginBottom:"2px" }}>COINS EARNED</div>
-                  <div style={{ fontFamily:"var(--f-disp)", fontSize:"28px", letterSpacing:"-1px", color:"var(--coin)", lineHeight:1 }}>+{coinEarned}</div>
-                </div>
-              </div>
-              <div style={{ display:"flex", justifyContent:"center", flexWrap:"wrap", gap:"4px", marginTop:"4px" }}>
-                {bd.filter(x => !x.l?.includes("STREAK")).map((x,i)=><span key={i} style={{ fontFamily:"var(--f-mono)", fontSize:"7px", color:x.c }}>{x.v} {x.l}</span>)}
-              </div>
-              <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", color:"var(--tx3)", marginTop:"5px" }}>Total: {S.rep}r · {S.coins||0}🪙</div>
-            </div>
-
-            {/* Rank change */}
-            <div style={{ background:"rgba(255,255,255,.04)", border:"1px solid rgba(255,255,255,.08)", borderRadius:"14px", padding:"12px", marginBottom:"10px", display:"flex", alignItems:"center", gap:"12px" }}>
-              <div style={{ textAlign:"center", flex:1 }}>
-                <div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", color:"var(--tx3)", marginBottom:"3px" }}>BEFORE</div>
-                <div style={{ fontFamily:"var(--f-disp)", fontSize:"26px", color:"#3a3a3a" }}>#{prevRank}</div>
-                <div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", color:prevTier.col }}>{prevTier.icon} {prevTier.short}</div>
-              </div>
-              <div style={{ textAlign:"center" }}>
-                <div style={{ fontFamily:"var(--f-disp)", fontSize:"20px", color:newRank<prevRank?"#4ade80":newRank>prevRank?"#f87171":"#d4a017" }}>{newRank<prevRank?"▲":newRank>prevRank?"▼":"—"}</div>
-              </div>
-              <div style={{ textAlign:"center", flex:1 }}>
-                <div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", color:"var(--tx3)", marginBottom:"3px" }}>NOW</div>
-                <div style={{ fontFamily:"var(--f-disp)", fontSize:"26px", color:"var(--tx)" }}>#{newRank}</div>
-                <div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", color:newTier.col }}>{newTier.icon} {newTier.short}</div>
-              </div>
-            </div>
-            <div style={{ marginTop:"-4px", marginBottom:"10px", textAlign:"center", fontFamily:"var(--f-mono)", fontSize:"7.5px", letterSpacing:".12em", color:rankMove>0?"#4ade80":rankMove<0?"#f87171":"var(--tx3)" }}>
-              {rankMove > 0 ? `CLIMBED ${rankMove} PLACE${rankMove>1?"S":""}` : rankMove < 0 ? `DROPPED ${Math.abs(rankMove)} PLACE${Math.abs(rankMove)>1?"S":""}` : "RANK HELD"}
-            </div>
-
-            {LB && <DramaticLeaderboard S={S} LB={LB} prevRank={prevRank} newRank={newRank}/>}
-          </div>
-        </div>
-
-        {/* Fixed footer with decision line + buttons */}
-        <div style={{ flexShrink:0, borderTop:"1px solid rgba(255,255,255,.12)", padding:"12px", background:"rgba(0,0,0,.2)", display:"flex", flexDirection:"column", gap:"8px" }}>
-          <div style={{ fontFamily:"var(--f-body)", fontSize:"12px", lineHeight:1.4, color:"rgba(238,245,240,.68)", marginBottom:"4px" }}>{decisionLine}</div>
-          <div style={{ display:"grid", gridTemplateColumns:"1.25fr .75fr", gap:"10px" }}>
+        <div style={{ borderTop:"1px solid rgba(255,255,255,.1)", padding:"14px", background:"rgba(0,0,0,.18)", display:"flex", flexDirection:"column", gap:"10px" }}>
+          <div style={{ fontFamily:"var(--f-body)", fontSize:"13px", lineHeight:1.45, color:"rgba(238,245,240,.68)" }}>{decisionLine}</div>
+          <div style={{ display:"grid", gridTemplateColumns:draw && onExtraTime ? "1fr 1fr .82fr" : "1.25fr .75fr", gap:"10px" }}>
+            {draw && onExtraTime && (
+              <button onClick={onExtraTime} style={{ padding:"14px", borderRadius:"11px", background:"linear-gradient(135deg,#facc15,#a3e635)", color:"var(--bg)", fontFamily:"var(--f-disp)", fontSize:"16px", letterSpacing:"2px", boxShadow:"0 0 32px rgba(250,204,21,.22)", border:"none", cursor:"pointer" }}>EXTRA TIME</button>
+            )}
             <button onClick={onAgain} style={{ padding:"14px", borderRadius:"11px", background:"linear-gradient(135deg,var(--green),#a3e635)", color:"var(--bg)", fontFamily:"var(--f-disp)", fontSize:"16px", letterSpacing:"2px", boxShadow:"0 0 32px rgba(24,193,88,.32)", border:"none", cursor:"pointer" }}>PLAY AGAIN</button>
             <button onClick={onHome}  style={{ padding:"14px", borderRadius:"11px", background:"rgba(255,255,255,.065)", border:"1px solid rgba(255,255,255,.13)", color:"var(--tx)", fontFamily:"var(--f-disp)", fontSize:"14px", letterSpacing:"1.5px", cursor:"pointer" }}>CLUBHOUSE</button>
           </div>
@@ -308,21 +230,31 @@ export function FullTime({ data, S, LB, opponentName = "RIVALS FC", onAgain, onH
 
 export function TierChangeModal({ data, onClose }) {
   const promoted = data.dir === "up";
-  const col      = promoted ? "#4ade80" : "#f87171";
+  const leagueName = data?.newTier?.name || "Master League";
+  const badge = data?.newTier?.icon || "MASTERS";
+  const leagueLogo = data?.newTier?.logo || null;
   return (
-    <div style={{ position:"absolute", inset:0, zIndex:120, display:"flex", alignItems:"center", justifyContent:"center", padding:"18px", background:"rgba(0,0,0,.5)", backdropFilter:"blur(8px)", animation:"flashIn .2s ease" }}>
-      <div style={{ width:"100%", maxWidth:"300px", borderRadius:"18px", padding:"22px 18px 16px", background:promoted?"linear-gradient(160deg,rgba(10,38,22,.98),rgba(8,18,12,.98))":"linear-gradient(160deg,rgba(46,16,16,.98),rgba(18,8,8,.98))", border:`1px solid ${col}40`, textAlign:"center" }}>
-        <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".28em", color:col, marginBottom:"6px" }}>{promoted?"ENTERING NEW SECTION":"SECTION CHANGED"}</div>
-        <div style={{ fontFamily:"var(--f-disp)", fontSize:"28px", letterSpacing:"2px", color:"var(--tx)", marginBottom:"5px" }}>{data.newTier.name}</div>
-        <div style={{ fontFamily:"var(--f-body)", fontSize:"12px", lineHeight:1.35, color:"rgba(238,245,240,.62)", marginBottom:"12px" }}>
-          {promoted ? "Your table position moved you into a stronger leaderboard band." : "Your table position moved you into a lower leaderboard band."}
+    <div style={{ position:"absolute", inset:0, zIndex:120, display:"flex", alignItems:"center", justifyContent:"center", padding:"clamp(18px,4vw,54px)", background:"rgba(0,0,0,.58)", backdropFilter:"blur(4px)", animation:"flashIn .2s ease" }}>
+      <div style={{ width:"min(58vw, 760px)", minWidth:"min(340px, calc(100vw - 36px))", minHeight:"min(360px, 54vh)", borderRadius:"18px", position:"relative", overflow:"hidden", background:"linear-gradient(135deg,#078428 0%,#0c8d2d 52%,#05701f 100%)", boxShadow:"0 28px 82px rgba(0,0,0,.42)", display:"grid", gridTemplateRows:"1fr auto", padding:"clamp(28px,4vw,52px)" }}>
+        <div style={{ position:"absolute", inset:0, opacity:.42, background:"linear-gradient(148deg,transparent 0 18%,rgba(255,255,255,.16) 18% 43%,transparent 43% 100%),linear-gradient(62deg,transparent 0 60%,rgba(255,255,255,.12) 60% 76%,transparent 76% 100%)" }}/>
+        <div style={{ position:"relative", zIndex:1, display:"grid", gridTemplateColumns:"minmax(110px,170px) minmax(0,1fr)", alignItems:"center", gap:"clamp(22px,4vw,50px)" }}>
+          <div style={{ justifySelf:"center", width:"clamp(92px,11vw,150px)", aspectRatio:"1", borderRadius:"22px", display:"grid", placeItems:"center", textAlign:"center", padding:"14px", background:"radial-gradient(circle at 44% 24%,#fff6a8,#101407 45%,#040704 100%)", border:"2px solid rgba(255,231,96,.72)", boxShadow:"0 18px 48px rgba(0,0,0,.36),0 0 32px rgba(250,204,21,.24)", color:"#f8e36b", fontFamily:"var(--f-disp)", fontSize:"clamp(18px,2.3vw,30px)", lineHeight:.85 }}>
+            {leagueLogo ? (
+              <img src={leagueLogo} alt="" draggable={false} onError={(e) => { e.currentTarget.style.display = "none"; e.currentTarget.parentElement.textContent = badge; }} style={{ width:"78%", height:"78%", objectFit:"contain", filter:"drop-shadow(0 10px 16px rgba(0,0,0,.32))" }} />
+            ) : badge}
+          </div>
+          <div>
+            <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(20px,2.2vw,30px)", fontWeight:800, color:"#fff", lineHeight:1.05, marginBottom:"12px" }}>
+              {promoted ? `Promoted to ${leagueName}` : `Moved to ${leagueName}`}
+            </div>
+            <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(16px,1.7vw,22px)", fontWeight:700, color:"rgba(255,255,255,.86)", lineHeight:1.28 }}>
+              {promoted ? "Congratulations! Keep up the good work!" : "Keep pushing. The climb back starts now."}
+            </div>
+          </div>
         </div>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", marginBottom:"12px" }}>
-          <div style={{ textAlign:"center" }}><div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", color:"var(--tx3)", marginBottom:"2px" }}>FROM</div><div style={{ fontFamily:"var(--f-disp)", fontSize:"16px", color:data.prevTier.col }}>{data.prevTier.icon}</div></div>
-          <div style={{ fontFamily:"var(--f-disp)", fontSize:"22px", color:col }}>{promoted?"▲":"▼"}</div>
-          <div style={{ textAlign:"center" }}><div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", color:"var(--tx3)", marginBottom:"2px" }}>TO</div><div style={{ fontFamily:"var(--f-disp)", fontSize:"16px", color:data.newTier.col }}>{data.newTier.icon}</div></div>
-        </div>
-        <button onClick={onClose} style={{ width:"100%", padding:"11px", borderRadius:"10px", background:col, color:promoted?"#062611":"#260808", fontFamily:"var(--f-disp)", fontSize:"14px", letterSpacing:"1.5px" }}>VIEW NEW SECTION</button>
+        <button onClick={onClose} style={{ position:"relative", zIndex:1, width:"100%", minHeight:"clamp(50px,6vh,66px)", borderRadius:"14px", background:"#fff", color:"#031007", fontFamily:"var(--f-body)", fontSize:"clamp(17px,1.8vw,24px)", fontWeight:900, border:0 }}>
+          OK
+        </button>
       </div>
     </div>
   );
@@ -331,28 +263,38 @@ export function TierChangeModal({ data, onClose }) {
 // ─── RewardModal ──────────────────────────────────────────────────────────────
 
 export function RewardModal({ cfg, onClaim, onSkip }) {
-  const isGold = cfg.type === "gold";
-  const pts    = getRewardParticles(isGold);
+  const amountValue = Number(cfg?.coins || cfg?.rep || 0);
+  const amount = amountValue.toLocaleString();
+  const amountLabel = cfg?.coins ? "ZAP" : "RANKING";
+  const rank = cfg?.rank || cfg?.ranking || "4TH";
+  const crest = cfg?.badgeImage || cfg?.crest || "/assets/crests/codmai.png";
+  const title = cfg?.title || "REWARD UNLOCKED";
+  const sub = cfg?.sub || "Claim your bonus";
   return (
-    <div style={{ position:"absolute", inset:0, background:"rgba(0,0,0,.86)", backdropFilter:"blur(10px)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:"14px", animation:"flashIn .2s ease" }}>
-      <div style={{ width:"100%", maxWidth:"290px", background:isGold?"linear-gradient(160deg,#0e0d05,#1a1508)":"linear-gradient(160deg,#0d1510,#111d14)", border:`1px solid ${isGold?"rgba(212,160,23,.4)":"rgba(24,193,88,.3)"}`, borderRadius:"18px", padding:"22px 16px 16px", textAlign:"center", position:"relative", overflow:"hidden", animation:isGold?"rewardPop .5s cubic-bezier(.34,1.56,.64,1),borderGlow 2s ease-in-out .6s infinite":"rewardPop .5s cubic-bezier(.34,1.56,.64,1)" }}>
-        {/* Particles */}
-        <div style={{ position:"absolute", inset:0, pointerEvents:"none", overflow:"hidden", zIndex:0 }}>
-          {pts.map((p,i) => (
-            <div key={i} style={{ position:"absolute", ...(p.tp==="c"?{width:"5px",height:"8px",borderRadius:"1px",left:p.l,top:"-12px"}:{width:"6px",height:"11px",borderRadius:"50% 50% 20% 20%",left:p.l,bottom:0}), background:p.bg, opacity:0, animation:`${p.tp==="c"?"confettiFall":"flameRise"} linear forwards`, animationDuration:p.d, animationDelay:p.dl, transform:`rotate(${p.r})` }}/>
-          ))}
-        </div>
-        <div style={{ position:"relative", zIndex:1 }}>
-          <div style={{ fontSize:"28px", marginBottom:"10px", animation:"bounceIn .6s ease" }}>{cfg.icon}</div>
-          <div style={{ fontFamily:"var(--f-disp)", fontSize:"26px", letterSpacing:"3px", color:"var(--tx)", lineHeight:1, marginBottom:"2px" }}>{cfg.title}</div>
-          <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".2em", color:"var(--tx3)", marginBottom:"14px" }}>{cfg.sub}</div>
-          <div style={{ background:isGold?"rgba(212,160,23,.05)":"rgba(24,193,88,.05)", border:`1px solid ${isGold?"rgba(212,160,23,.25)":"rgba(24,193,88,.2)"}`, borderRadius:"12px", padding:"12px", marginBottom:"10px" }}>
-            <div style={{ fontFamily:"var(--f-disp)", fontSize:"44px", letterSpacing:"-2px", color:isGold?"var(--gold)":"var(--green)", lineHeight:1 }}>+{cfg.rep}</div>
-            <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", color:"var(--tx3)", marginTop:"1px" }}>REPUTATION POINTS</div>
+    <div style={{ position:"absolute", inset:0, zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:"clamp(18px,4vw,54px)", background:"rgba(0,0,0,.58)", backdropFilter:"blur(5px)", animation:"flashIn .2s ease" }}>
+      <div style={{ width:"min(40vw, 560px)", minWidth:"min(320px, calc(100vw - 36px))", height:"min(40vh, 390px)", minHeight:"300px", borderRadius:"18px", position:"relative", overflow:"hidden", background:"linear-gradient(180deg,#087d26 0%,#078526 58%,#128d34 58%,#0b7625 100%)", boxShadow:"0 24px 70px rgba(0,0,0,.42)", display:"grid", gridTemplateRows:"1fr auto", padding:"clamp(22px,3vw,38px)" }}>
+        <div style={{ position:"absolute", inset:0, opacity:.3, background:"linear-gradient(90deg,transparent 0 15%,rgba(255,255,255,.15) 15% 35%,transparent 35% 68%,rgba(255,255,255,.13) 68% 100%),linear-gradient(180deg,transparent 0 78%,rgba(255,255,255,.08) 78% 100%)" }}/>
+        <div style={{ position:"relative", zIndex:1, display:"grid", placeItems:"center", alignContent:"center", textAlign:"center" }}>
+          <div style={{ width:"clamp(58px,6vw,86px)", height:"clamp(58px,6vw,86px)", borderRadius:"18px", display:"grid", placeItems:"center", background:"rgba(2,10,6,.36)", border:"1px solid rgba(255,255,255,.16)", boxShadow:"0 12px 24px rgba(0,0,0,.24),0 0 24px rgba(250,204,21,.16)", marginBottom:"clamp(14px,2vw,22px)" }}>
+            <img src={crest} alt="" draggable={false} onError={(e) => { e.currentTarget.style.display = "none"; }} style={{ width:"72%", height:"72%", objectFit:"contain", filter:"drop-shadow(0 10px 18px rgba(0,0,0,.3))" }} />
           </div>
-          <button onClick={onClaim} style={{ width:"100%", padding:"13px", borderRadius:"10px", background:isGold?"var(--gold)":"var(--green)", color:isGold?"#0e0900":"var(--bg)", fontFamily:"var(--f-disp)", fontSize:"15px", letterSpacing:"2px", marginBottom:"6px" }}>CLAIM REWARD</button>
-          <button onClick={onSkip}  style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".1em", color:"var(--tx3)", padding:"4px", width:"100%" }}>Skip for now</button>
+          <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(16px,1.55vw,22px)", fontWeight:900, color:"#fff", lineHeight:1, textTransform:"uppercase", marginBottom:"8px" }}>
+            {title}
+          </div>
+          <div style={{ fontFamily:"var(--f-mono)", fontSize:"clamp(6px,.7vw,8px)", letterSpacing:".16em", color:"rgba(255,255,255,.68)", textTransform:"uppercase", marginBottom:"clamp(10px,1.5vw,18px)" }}>
+            {sub}
+          </div>
+          <div style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", gap:"10px", fontFamily:"var(--f-body)", fontSize:"clamp(34px,4.8vw,58px)", fontWeight:900, color:"#fff", lineHeight:.85, marginBottom:"clamp(10px,1.5vw,16px)" }}>
+            <span>+{amount}</span>
+            {cfg?.coins && <img src={COIN_ICON} alt="" draggable={false} style={{ width:"clamp(28px,3.6vw,44px)", height:"clamp(28px,3.6vw,44px)", objectFit:"contain", filter:"drop-shadow(0 8px 14px rgba(0,0,0,.3))" }} />}
+          </div>
+          <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(14px,1.5vw,20px)", fontWeight:900, color:"#fff", lineHeight:1, textTransform:"uppercase" }}>
+            {cfg?.coins ? amountLabel : `RANKING ${rank}`}
+          </div>
         </div>
+        <button onClick={onClaim || onSkip} style={{ position:"relative", zIndex:1, width:"100%", minHeight:"clamp(44px,5vh,56px)", borderRadius:"12px", background:"#fff", color:"#031007", fontFamily:"var(--f-body)", fontSize:"clamp(15px,1.5vw,20px)", fontWeight:900, border:0 }}>
+          OK
+        </button>
       </div>
     </div>
   );

@@ -2,38 +2,51 @@
 // Orchestrates the live match. Owns all in-game state via useRef/useState.
 // Delegates rendering to pitch, player, and UI sub-components.
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 
 import { PitchMarkings, PremiumBall, GoalMomentSVG } from "../pitch/pitch.jsx";
 import PlayerFigure from "../players/PlayerFigure.jsx";
 import MatchStadiumShell from "../ui/MatchStadiumShell.jsx";
-import { ScoreBar, StatPanel, ActionCards, ResolutionScreen, Commentary, CPUChoiceBanner, ResultFlash, IntentDirectionArrow, PitchCueBadges } from "../ui/ui.jsx";
-import { HalfTime, FullTime, TierChangeModal, RewardModal, DemotionModal } from "../modals/matchModals.jsx";
+import { ScoreBar, ActionCards, ResolutionScreen, Commentary, CPUChoiceBanner, ResultFlash, IntentDirectionArrow, PitchCueBadges } from "../ui/ui.jsx";
+import { HalfTime, FullTime, RewardModal, TierChangeModal } from "../modals/matchModals.jsx";
 import GuidedCueOverlay from "../components/GuidedCueOverlay.jsx";
+import { playSound } from "../lib/sound.js";
 
 import {
   resolveIntent, buildTurnContext, getIntentRoute, mkTimeSeed, turnToTime,
-  buildMatchRewards, checkRewardUnlock,
-  simCPU, pick, clamp, rand01, getReadMatchup,
+  buildMatchRewards,
+  simCPU, pick, clamp, rand01, getReadMatchup, checkRewardUnlock,
 } from "./gameLogic.js";
 import { myRank, getTier, getFormation } from "./gameState.js";
-import { BT, RESMSG, REWARDS, OPPONENT_INTENTS, INTENTS } from "./constants.js";
+import { BT, RESMSG, OPPONENT_INTENTS, INTENTS, TURN_SITUATIONS, REWARDS } from "./constants.js";
 import { trackTurnPlayed, trackHalftimeReached, trackMatchCompleted } from "../lib/analytics.js";
 
 const TURNS_PER_HALF = 10;
 const MAX_TURNS = TURNS_PER_HALF * 2;
+const STADIUM_SETUP_BG = "/assets/bg/stadium-setup-bg.png";
 const CHAIN_STATUS = {
   ACTIVE: 0,
   HALFTIME: 1,
   FINISHED: 2,
   CLAIMED: 3,
 };
+const SHOW_THREAT_AURAS = false;
+const SHOW_PITCH_CUE_BADGES = false;
+const SHOW_INTENT_DIRECTION = false;
+const SHOW_PHASE_TRANSITION = false;
+const SHOW_CPU_BANNER = false;
+const SHOW_COMMENTARY_BAR = false;
+const SHOW_TURN_CONTEXT_LINE = false;
+const SHOW_CUE_TOGGLE = false;
+const SHOW_RESULT_FLASH = false;
+const SHOW_GUIDED_CUES = false;
 const EMPTY_MATCH_STATS = { shots_h:0, shots_a:0, saves_h:0, saves_a:0, attacks_h:0, attacks_a:0 };
 const distSq = (a, b) => ((a?.x ?? 0) - (b?.x ?? 0)) ** 2 + ((a?.y ?? 0) - (b?.y ?? 0)) ** 2;
 
-function getTurnContextLine({ score, gs, matchTime, momentum }) {
+function getTurnContextLine({ score, gs, matchTime, momentum, midfieldSide }) {
   if (momentum === "in_form") return "IN FORM · THEY HAVEN'T READ YOU YET";
   if (momentum === "under_pressure") return "UNDER PRESSURE · FIND YOUR WAY BACK";
+  if (gs === "MIDFIELD" && midfieldSide === "away") return `${score?.h ?? 0}-${score?.a ?? 0} · DEFEND MIDFIELD · ${matchTime}`;
   if ((score?.h ?? 0) < (score?.a ?? 0) && gs === "DEFEND") return `${score.h}-${score.a} DOWN · DEFEND · ${matchTime}`;
   if ((score?.h ?? 0) > (score?.a ?? 0) && matchTime) return `${score.h}-${score.a} UP · ${gs} · ${matchTime}`;
   return `${score?.h ?? 0}-${score?.a ?? 0} · ${gs} · GAME IS OPEN`;
@@ -58,7 +71,7 @@ function buildMomentCamera(context, gs) {
 
   if (!ballCarrier) {
     const origin = gs === "ATTACK" ? "76% 50%" : gs === "DEFEND" ? "24% 50%" : "50% 50%";
-    return { transform: gs === "ATTACK" ? "scale(1.22)" : gs === "DEFEND" ? "scale(1.16)" : "scale(1.08)", transformOrigin: origin };
+    return { transform: gs === "ATTACK" ? "scale(1.14)" : gs === "DEFEND" ? "scale(1.09)" : "scale(1.02)", transformOrigin: origin };
   }
 
   const byId = (id) => players.find(p => p.id === id) || null;
@@ -103,7 +116,7 @@ function buildMomentCamera(context, gs) {
   const rawZoom = Math.min(100 / (width + xPad), 100 / (height + yPad));
   const maxZoom = gs === "ATTACK" ? 3.35 : gs === "DEFEND" ? 3.18 : 2.85;
   const closeFloor = gs === "MIDFIELD" ? 1.72 : 1.86;
-  const zoom = rawZoom >= closeFloor ? Math.min(rawZoom, maxZoom) : rawZoom;
+  const zoom = (rawZoom >= closeFloor ? Math.min(rawZoom, maxZoom) : rawZoom) * 0.92;
 
   const direction = ballCarrier.t === "a" ? -1 : 1;
   const visibleWidth = 100 / zoom;
@@ -127,6 +140,8 @@ function buildMatchSnapshot(S) {
   const repTier = clamp(Math.floor((S.rep || 50) / 60), 0, 3);
   const cpuBase = 4 + repTier;
   const timeSeed = mkTimeSeed();
+  const openingPoolSize = TURN_SITUATIONS.MIDFIELD?.length || 1;
+  const openingSituation = Math.floor(rand01() * openingPoolSize);
   const game = {
     stats: {
       atk: Math.floor(rand01()*5)+5+(S.atkBoost||0),
@@ -137,22 +152,71 @@ function buildMatchSnapshot(S) {
       cpu_def: Math.floor(rand01()*4)+cpuBase,
     },
     score:{ h:0, a:0 }, turn:1, max:MAX_TURNS,
-    gs:"MIDFIELD", phase:"playing", si:0,
+    gs:"MIDFIELD", phase:"playing", si:openingSituation, midfieldSide:"home",
   };
 
   return { game, timeSeed, matchStats: { ...EMPTY_MATCH_STATS } };
 }
 
+const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const nextSituationIndex = (current, phase) => {
+  const poolSize = TURN_SITUATIONS[phase]?.length || 1;
+  if (poolSize <= 1) return current + 1;
+  const step = 1 + Math.floor(rand01() * Math.min(4, poolSize - 1));
+  return current + step;
+};
+
 function displayFromGame(g, S) {
-  const context = buildTurnContext(g.gs, g.si, g.stats, S.formationId || null);
+  const context = buildTurnContext(g.gs, g.si, g.stats, S.formationId || null, { midfieldSide:g.midfieldSide || "home" });
   const players = context.players;
   const holder = players.find(p => p.hB);
 
   return {
-    gs:g.gs, score:{...g.score}, turn:g.turn,
+    gs:g.gs, score:{...g.score}, turn:g.turn, midfieldSide:g.midfieldSide || "home",
     players, ball:holder?{x:holder.x,y:holder.y}:{x:50,y:50},
     stats:{...g.stats}, si:g.si, context,
   };
+}
+
+function StadiumSetupScreen({ progress, S, opponentName }) {
+  const fixture = `${(S?.clubName || "ZAP FC").toUpperCase()} VS ${(opponentName || "RIVALS FC").toUpperCase()}`;
+  return (
+    <MatchStadiumShell>
+      <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#020504", display:"grid", alignItems:"end", justifyItems:"center", padding:"0 24px clamp(92px,15vh,150px)" }}>
+        <div style={{ position:"absolute", inset:0, background:`radial-gradient(ellipse 62% 44% at 50% 74%,rgba(24,193,88,.18),transparent 70%),linear-gradient(180deg,rgba(2,5,4,.24),rgba(2,5,4,.78) 72%,#020504 100%),url("${STADIUM_SETUP_BG}") center / cover no-repeat` }}/>
+        <div style={{ width:"min(620px, calc(100% - 36px))", position:"relative", zIndex:1, textAlign:"center" }}>
+          <div style={{ fontFamily:"var(--f-cond)", fontWeight:800, fontSize:"clamp(18px,2.5vw,34px)", color:"rgba(255,255,255,.78)", letterSpacing:".04em", marginBottom:"24px", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+            {fixture}
+          </div>
+
+          <div style={{ position:"relative", height:"18px", borderRadius:"999px", background:"rgba(255,255,255,.09)", border:"1px solid rgba(255,255,255,.12)", overflow:"visible", boxShadow:"inset 0 1px 8px rgba(0,0,0,.35)" }}>
+            <div style={{
+              width:`${progress}%`,
+              height:"100%",
+              borderRadius:"inherit",
+              background:"linear-gradient(90deg,#facc15,#22c55e,#38bdf8)",
+              boxShadow:"0 0 26px rgba(34,197,94,.36)",
+              transition:"width .18s ease",
+            }}/>
+            <div style={{
+              position:"absolute",
+              left:`calc(${progress}% - 10px)`,
+              top:"50%",
+              width:"22px",
+              height:"22px",
+              borderRadius:"50%",
+              transform:"translateY(-50%)",
+              background:"radial-gradient(circle at 35% 30%,#fff,#d7d7d7 52%,#1f2937 54%,#fff 56%)",
+              border:"1px solid rgba(0,0,0,.3)",
+              boxShadow:"0 4px 12px rgba(0,0,0,.42), 0 0 18px rgba(255,255,255,.22)",
+              transition:"left .18s ease",
+            }}/>
+          </div>
+        </div>
+      </div>
+    </MatchStadiumShell>
+  );
 }
 
 export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToast, dojo, account, provider, opponent }) {
@@ -161,7 +225,10 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const timerRef = useRef(null);
   const matchStatsRef = useRef(initialSnapshot.matchStats);
   const chainStartedRef = useRef(false);
+  const setupStartedRef = useRef(false);
   const halftimeContinueRef = useRef(false);
+  const postMatchNextRef = useRef(null);
+  const extraTimeRef = useRef(false);
 
   // ── Derived formation info ───────────────────────────────────────────────
   const formation = getFormation(S.formationId);
@@ -175,17 +242,21 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const [previewIntentId, setPreviewIntentId] = useState(null);
   const [selectedRate, setSelectedRate] = useState(null);
   const [selectedOutcome, setSelectedOutcome] = useState(null);
+  const [resolutionReaction, setResolutionReaction] = useState(null);
   const [pendingTurn, setPendingTurn] = useState(null);
   const [chainStarting, setChainStarting] = useState(false);
   const [chainFailed, setChainFailed] = useState(false);
+  const [preMatchStage, setPreMatchStage] = useState("loading");
+  const [setupProgress, setSetupProgress] = useState(6);
   const [result,      setResult]      = useState(null);
   const [momentOvl,   setMomentOvl]   = useState(null);
   const [htOvl,       setHtOvl]       = useState(null);
   const [ftOvl,       setFtOvl]       = useState(null);
-  const [celebrate,   setCelebrate]   = useState(false);
-  const [reward,      setReward]      = useState(null);
+  const [rewardOvl,   setRewardOvl]   = useState(null);
   const [tierOvl,     setTierOvl]     = useState(null);
-  const [demotionOvl, setDemotionOvl] = useState(null);
+  const [pauseOpen,   setPauseOpen]   = useState(false);
+  const [matchFeed,   setMatchFeed]   = useState("Opening whistle. Read the first pressure.");
+  const [celebrate,   setCelebrate]   = useState(false);
   const [transitionOvl, setTransitionOvl] = useState(null);
   const [popH,        setPopH]        = useState(false);
   const [popA,        setPopA]        = useState(false);
@@ -223,6 +294,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   };
   // Tracks opponent intents seen in first half for half-time scouting (Fix 7)
   const opponentIntentLogRef = useRef([]);
+  const matchMaxTurns = () => extraTimeRef.current ? MAX_TURNS + 4 : MAX_TURNS;
 
   const toggleCueBadges = () => {
     setShowCueBadges(prev => {
@@ -269,21 +341,54 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setTimeout(() => setTimePop(false), 400);
   };
 
-  // ── Initialise on mount ──────────────────────────────────────────────────
+  const beginStadiumSetup = async () => {
+    const side = "home";
+    const g = gRef.current;
+    if (g) {
+      g.midfieldSide = side;
+      sync(g);
+    }
+
+    setPreMatchStage("loading");
+    setSetupProgress(8);
+    const progressTimer = window.setInterval(() => {
+      setSetupProgress((p) => Math.min(94, p + 4 + Math.floor(rand01() * 5)));
+    }, 360);
+
+    try {
+      const chainTask = dojo && account && !chainStartedRef.current
+        ? startChainMatch()
+        : Promise.resolve();
+      await Promise.all([chainTask, sleep(2200)]);
+      setSetupProgress(100);
+      await sleep(280);
+      setPreMatchStage("play");
+      playSound("halftimeWhistle", { volume:0.24 });
+      playSound("crowdKickoff", { volume:0.22 });
+    } finally {
+      window.clearInterval(progressTimer);
+    }
+  };
+
   useEffect(() => {
-    if (dojo && account && !chainStartedRef.current) startChainMatch();
-  }, [account, dojo, startChainMatch]);
+    if (preMatchStage !== "loading" || setupStartedRef.current) return;
+    setupStartedRef.current = true;
+    beginStadiumSetup();
+    // The setup routine owns its own timers and async handoff for this stage.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [preMatchStage]);
 
   // ── Advance to next turn (or halftime / full-time) ───────────────────────
   const showHalftime = (g) => {
     g.phase = "halftime";
-    const context = buildTurnContext(g.gs, g.si, g.stats, S.formationId || null);
+    const context = buildTurnContext(g.gs, g.si, g.stats, S.formationId || null, { midfieldSide:g.midfieldSide || "home" });
     const pl = context.players;
     const holder = pl.find(p => p.hB);
     setDisp({
       gs:g.gs,
       score:{...g.score},
       turn:g.turn,
+      midfieldSide:g.midfieldSide || "home",
       players:pl,
       ball:holder ? {x:holder.x,y:holder.y} : {x:50,y:50},
       stats:{...g.stats},
@@ -302,6 +407,8 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       turnsCorrect: tc.correct,
       turnsWrong:   tc.wrong,
     });
+    playSound("halftimeWhistle", { volume:0.26 });
+    playSound("crowdCheer", { volume:0.15 });
     setHtOvl({
       score:{...g.score},
       matchStats:{...matchStatsRef.current},
@@ -311,10 +418,19 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
   const advanceTurn = (g, nextGs, turnResult = null) => {
     const prevGs = g.gs;
-    g.si++;
+    const prevMidfieldSide = g.midfieldSide || "home";
     g.gs = nextGs;
-    
-    if (prevGs === "MIDFIELD" && nextGs === "DEFEND") {
+    g.si = nextSituationIndex(g.si, nextGs);
+
+    if (nextGs === "MIDFIELD") {
+      g.midfieldSide = turnResult?.nextMidfieldSide || "home";
+    } else {
+      g.midfieldSide = null;
+    }
+
+    if (prevGs === "MIDFIELD" && prevMidfieldSide === "away" && nextGs === "DEFEND") {
+      g.si = pickDefendIndexFromLoss(turnResult?.lossDirection, g.si);
+    } else if (prevGs === "MIDFIELD" && nextGs === "DEFEND") {
       g.si = pickDefendIndexFromLoss(turnResult?.lossDirection, g.si);
     }
 
@@ -341,7 +457,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     }
 
     // Check if game should end (defensive check; chain status wins above)
-    if (g.turn > MAX_TURNS) {
+    if (g.turn > matchMaxTurns()) {
       endGame(g); 
       return; 
     }
@@ -385,8 +501,14 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setCpuChoice({ lbl:"Resolving...", favorable:null, narr:"" });
 
     const buildLocalTurnResult = () => {
-      const context = buildTurnContext(prevPhase, g.si, g.stats, S.formationId || null);
-      const local = resolveIntent({ context, playerIntent: context.availableIntents?.[idx] || idx, stats: g.stats });
+      const context = buildTurnContext(prevPhase, g.si, g.stats, S.formationId || null, { midfieldSide:g.midfieldSide || "home" });
+      const local = resolveIntent({
+        context,
+        playerIntent: context.availableIntents?.[idx] || idx,
+        stats: g.stats,
+        opponentName: opponent?.name || null,
+        difficulty: opponent?.difficulty || "medium",
+      });
       const goalScored = local.nextGs === "GOAL";
       const conceded = local.nextGs === "CONCEDE";
 
@@ -400,6 +522,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
         goalScored,
         conceded,
         nextGs: goalScored || conceded ? "MIDFIELD" : local.nextGs,
+        nextMidfieldSide: goalScored ? "away" : conceded ? "home" : local.nextMidfieldSide,
         cpuLbl: local.cpuLbl,
         cpuIntent: local.cpuIntent,
         playerIntent: local.playerIntent,
@@ -421,7 +544,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       if (!account) throw new Error("Account not connected");
       if (!provider) throw new Error("Provider not initialized");
       
-      const context = buildTurnContext(prevPhase, g.si, g.stats, S.formationId || null);
+      const context = buildTurnContext(prevPhase, g.si, g.stats, S.formationId || null, { midfieldSide:g.midfieldSide || "home" });
       const intentId = context.availableIntents?.[idx] || null;
       const route = getIntentRoute(prevPhase, context, intentId);
       
@@ -431,17 +554,38 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
       const phaseMap = { 0: "MIDFIELD", 1: "ATTACK", 2: "DEFEND" };
       const nextGs = phaseMap[chainResult.currentPhase] || "MIDFIELD";
+      const midfieldSide = context.midfieldSide || "home";
+      let clientNextGs = nextGs;
+      let clientNextMidfieldSide = null;
+
+      if (chainResult.goalScored || chainResult.conceded || prevPhase === "ATTACK") {
+        clientNextGs = "MIDFIELD";
+        clientNextMidfieldSide = chainResult.goalScored || prevPhase === "ATTACK" ? "away" : "home";
+      } else if (prevPhase === "MIDFIELD" && midfieldSide === "away") {
+        clientNextGs = chainResult.actionSuccess ? "MIDFIELD" : "DEFEND";
+        clientNextMidfieldSide = chainResult.actionSuccess ? "home" : null;
+      } else if (prevPhase === "MIDFIELD") {
+        clientNextGs = chainResult.actionSuccess ? "ATTACK" : "MIDFIELD";
+        clientNextMidfieldSide = chainResult.actionSuccess ? null : "away";
+      } else if (prevPhase === "DEFEND" && chainResult.actionSuccess) {
+        clientNextGs = "MIDFIELD";
+        clientNextMidfieldSide = "home";
+      }
 
       g.score.h = chainResult.scoreH;
       g.score.a = chainResult.scoreA;
-      g.turn = Math.min(chainResult.turnNumber + 1, MAX_TURNS);
+      g.turn = Math.min(chainResult.turnNumber + 1, matchMaxTurns());
 
       const playerIntentBase = (INTENTS[prevPhase] || []).find(i => i.id === intentId) || (INTENTS[prevPhase] || [])[idx] || null;
       const opponentId = Number.isInteger(chainResult.cpuAction)
         ? context.opponentIntents?.[chainResult.cpuAction] || null
         : null;
+      const allIntentCopies = [
+        ...Object.values(OPPONENT_INTENTS || {}).flat(),
+        ...Object.values(INTENTS || {}).flat(),
+      ];
       const cpuIntent = Number.isInteger(chainResult.cpuAction)
-        ? (OPPONENT_INTENTS[prevPhase] || []).find(i => i.id === opponentId) || null
+        ? allIntentCopies.find(i => i.id === opponentId) || null
         : null;
       const matchup = getReadMatchup(context, intentId, opponentId);
       const playerIntent = playerIntentBase
@@ -455,22 +599,18 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
       if (chainResult.goalScored) {
         cm = "Goal! Ball in the net!";
-        cpuLbl = "GOAL";
         favorable = true;
         why = "The chain resolved this as a goal.";
       } else if (chainResult.conceded) {
         cm = "Conceded! Opposition scores!";
-        cpuLbl = "CONCEDED";
         favorable = false;
         why = "The chain resolved this as a concession.";
       } else if (prevPhase === "ATTACK") {
         cm = pick(["Shot saved by keeper", "Just wide of the goal"]);
-        cpuLbl = "MISS";
         favorable = false;
         why = "The read lost.";
       } else if (prevPhase === "DEFEND") {
         cm = chainResult.actionSuccess ? "Defended well!" : "They found a way through.";
-        cpuLbl = chainResult.actionSuccess ? "DEFENDED" : "CONCEDED";
         favorable = chainResult.actionSuccess;
         why = chainResult.actionSuccess ? "The read won." : "The read lost.";
       } else {
@@ -488,7 +628,8 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
         ok: chainResult.actionSuccess,
         goalScored: chainResult.goalScored,
         conceded: chainResult.conceded,
-        nextGs: chainResult.goalScored || chainResult.conceded ? "MIDFIELD" : nextGs,
+        nextGs: clientNextGs,
+        nextMidfieldSide: clientNextMidfieldSide,
         cpuLbl,
         cpuIntent,
         playerIntent,
@@ -551,6 +692,14 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       // Log opponent intent for half-time scouting (Fix 7)
       if (turnResult.cpuIntent?.id) {
         opponentIntentLogRef.current.push(turnResult.cpuIntent.id);
+        const usedCount = opponentIntentLogRef.current.filter((id) => id === turnResult.cpuIntent.id).length;
+        const readName = String(turnResult.cpuIntent.lbl || turnResult.cpuIntent.id).toUpperCase();
+        const club = String(opponent?.name || "RIVALS FC").toUpperCase();
+        setMatchFeed(
+          usedCount === 1
+            ? `${club} played ${readName} for the first time.`
+            : `${club} used ${readName} ${usedCount}x this match.`
+        );
       }
 
       setSelectedRate(turnResult.rate);
@@ -558,18 +707,28 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       if (prevPhase === "ATTACK") { matchStatsRef.current.shots_h++; matchStatsRef.current.attacks_h++; }
       if (prevPhase === "DEFEND" && !turnResult.conceded) matchStatsRef.current.saves_h++;
       if (prevPhase === "DEFEND" && turnResult.conceded) matchStatsRef.current.shots_a++;
-      if (prevPhase === "MIDFIELD") matchStatsRef.current.attacks_h++;
+      if (prevPhase === "MIDFIELD" && turnResult.context?.midfieldSide !== "away") matchStatsRef.current.attacks_h++;
+      if (prevPhase === "MIDFIELD" && turnResult.context?.midfieldSide === "away") matchStatsRef.current.attacks_a++;
 
       const targetBall = turnResult.movement?.target || { x:bt.x, y:bt.y };
+      setResolutionReaction({
+        playerId: turnResult.context?.ballCarrierId || turnResult.movement?.ballFrom || null,
+        ok: turnResult.ok,
+      });
+      setTimeout(() => setResolutionReaction(null), 330);
       setDisp(d => ({ ...d, ball:{ x:targetBall.x, y:targetBall.y }, context: turnResult.context || d.context }));
       setCpuChoice({ lbl:turnResult.cpuLbl, favorable:turnResult.favorable, narr:turnResult.narr });
       setTimeout(() => setCommentary(turnResult.cm), 300);
       setPendingTurn({ turnResult, prevPhase });
+      if (!turnResult.goalScored && !turnResult.conceded) {
+        playSound(turnResult.ok ? "readWin" : "readLoss", { volume:0.18 });
+      }
 
     } catch (e) {
       setCpuChoice(null);
       setSelectedRate(null);
       setSelectedOutcome(null);
+      setResolutionReaction(null);
       setPendingTurn(null);
       setPhase("playing");
       g.phase = "playing";
@@ -588,15 +747,18 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setSelectedAction(null);
     setSelectedRate(null);
     setSelectedOutcome(null);
+    setResolutionReaction(null);
     setCpuChoice(null);
     setCommentary("");
 
     if (turnResult.goalScored) {
+      playSound("goalCheer", { volume:0.3 });
       setPopH(true); setTimeout(() => setPopH(false), 400);
       setCelebrate(true); setTimeout(() => setCelebrate(false), 2400);
       setMomentOvl({ type:pick(["goal_left","goal_centre","goal_right"]), isGoal:true, isConcede:false, label:"GOAL!", cm:turnResult.cm });
-      timerRef.current = setTimeout(() => { setMomentOvl(null); advanceTurn(g, "MIDFIELD", turnResult); }, 2600);
+      timerRef.current = setTimeout(() => { setMomentOvl(null); advanceTurn(g, turnResult.nextGs || "MIDFIELD", turnResult); }, 2600);
     } else if (turnResult.conceded) {
+      playSound("goalCheer", { volume:0.22 });
       setPopA(true); setTimeout(() => setPopA(false), 400);
       setMomentOvl({ type:pick(["goal_left","goal_centre","goal_right"]), isGoal:false, isConcede:true, label:"CONCEDED", cm:turnResult.cm });
       timerRef.current = setTimeout(() => { setMomentOvl(null); advanceTurn(g, "MIDFIELD", turnResult); }, 2600);
@@ -620,7 +782,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setPhase("finished");
     clearTimeout(timerRef.current);
     const prevRank  = myRank(S, LB);
-    const prevTier  = getTier(prevRank);
+    const prevTier  = getTier(S.rep || 0);
 
     const { repDelta, breakdowns, nextState: ns } = buildMatchRewards(score, S);
     ns.lastDelta    = repDelta;
@@ -628,7 +790,11 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
     const newLB   = simCPU(LB);
     const newRank = myRank(ns, newLB);
-    const newTier = getTier(newRank);
+    const newTier = getTier(ns.rep || 0);
+    const rewardKey = checkRewardUnlock(ns);
+    const tierChange = prevTier?.name !== newTier?.name
+      ? { dir:newRank < prevRank ? "up" : "down", prevTier, newTier, newRank }
+      : null;
 
     setS(ns);
     setLB(newLB);
@@ -644,6 +810,8 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     }
 
     const tca = turnCountRef.current;
+    playSound("halftimeWhistle", { volume:0.24 });
+    playSound("matchEnd", { volume:0.24 });
     trackMatchCompleted({
       score,
       win:           score.h > score.a,
@@ -655,63 +823,83 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       formationId:   S?.formationId || "unknown",
       opponentStyle: "unknown",
     });
-    setFtOvl({ h:score.h, a:score.a, win:score.h>score.a, draw:score.h===score.a, delta:repDelta, bd:breakdowns, prevRank, newRank, prevTier, newTier, matchStats:{...matchStatsRef.current} });
-    if (prevTier.name !== newTier.name) {
-      const isPromotion = newRank < prevRank;
-      if (isPromotion) {
-        setTimeout(() => setTierOvl({ prevTier, newTier, dir:"up" }), 1200);
-      } else {
-        setTimeout(() => setDemotionOvl({ fromTier:prevTier, toTier:newTier, newRank }), 1200);
-      }
-    }
-
-    const rewardType = checkRewardUnlock(ns);
-    if (rewardType) setTimeout(() => setReward({ type:rewardType, S:ns }), 2200);
-  };
-
-  // ── Claim / skip reward ──────────────────────────────────────────────────
-  const claimReward = async (skipped) => {
-    const type = reward?.type;
-    const rS   = reward?.S || S;
-    setReward(null);
-    if (!type) return;
-
-    const cfg = REWARDS[type];
-    let ns    = { ...rS };
-
-    if (type === "firstWin") {
-      ns.firstWinClaimed = true;
-      if (!skipped) { ns.rep = (ns.rep||0)+cfg.rep; showToast(`🎁 +${cfg.rep} Rep Bonus!`); }
-    } else {
-      if (!ns.streakRewardsClaimed) ns.streakRewardsClaimed = {};
-      ns.streakRewardsClaimed["5"] = true;
-      if (!skipped) { ns.rep = (ns.rep||0)+cfg.rep; showToast(`⚡ +${cfg.rep} Rep!`); }
-    }
-
-    setS(ns);
-    if (type === "firstWin" && ns.streak === 5 && !ns.streakRewardsClaimed?.["5"]) {
-      setTimeout(() => setReward({ type:"fiveStreak", S:ns }), 300);
-    }
+    setFtOvl({ h:score.h, a:score.a, win:score.h>score.a, draw:score.h===score.a, delta:repDelta, bd:breakdowns, prevRank, newRank, prevTier, newTier, rewardKey, tierChange, nextState:ns, matchStats:{...matchStatsRef.current} });
   };
 
   // ── Derived render values ────────────────────────────────────────────────
-  const { gs, score, turn, players, ball, stats, si, context } = disp;
+  const { gs, score, turn, players, ball, si, context, midfieldSide } = disp;
   const zm         = { MIDFIELD:{ col:"#facc15" }, ATTACK:{ col:"#4ade80" }, DEFEND:{ col:"#f87171" } }[gs];
   const matchTime  = turnToTime(turn, timeSeed);
   const isSecondHalf = turn > TURNS_PER_HALF;
-  const turnContextLine = getTurnContextLine({ score, gs, matchTime, momentum: momentumDisplay });
+  const turnContextLine = getTurnContextLine({ score, gs, matchTime, momentum: momentumDisplay, midfieldSide });
   const showGuide = isFirstMatch && !guidedDismissed.has(turn);
 
   // Close moment camera: big players, while preserving the carrier/press/runner/support read.
   const phaseCamera = buildMomentCamera(context, gs);
   const opponentName = opponent?.name || "RIVALS FC";
 
+  const continuePostMatch = () => {
+    if (tierOvl) {
+      setTierOvl(null);
+    }
+    const next = postMatchNextRef.current;
+    postMatchNextRef.current = null;
+    next?.();
+  };
+
+  const claimReward = () => {
+    if (!rewardOvl?.key) {
+      setRewardOvl(null);
+      continuePostMatch();
+      return;
+    }
+
+    const reward = REWARDS[rewardOvl.key] || {};
+    const claimedState = {
+      ...rewardOvl.state,
+      rep: Math.max(0, Number(rewardOvl.state?.rep || 0) + Number(reward.rep || 0)),
+      coins: Math.max(0, Number(rewardOvl.state?.coins || 0) + Number(reward.coins || 0)),
+      firstPlayClaimed: rewardOvl.key === "firstPlay" ? true : rewardOvl.state?.firstPlayClaimed,
+      firstWinClaimed: rewardOvl.key === "firstWin" ? true : rewardOvl.state?.firstWinClaimed,
+      streakRewardsClaimed: rewardOvl.key === "fiveStreak"
+        ? { ...(rewardOvl.state?.streakRewardsClaimed || {}), 5:true }
+        : rewardOvl.state?.streakRewardsClaimed,
+    };
+    setS(claimedState);
+
+    if (rewardOvl.key === "firstPlay" && claimedState.wins === 1 && !claimedState.firstWinClaimed) {
+      setRewardOvl({ key:"firstWin", state:claimedState, rank:rewardOvl.rank });
+      return;
+    }
+
+    setRewardOvl(null);
+
+    if (ftOvl?.tierChange?.dir === "up") {
+      setTierOvl(ftOvl.tierChange);
+      return;
+    }
+
+    continuePostMatch();
+  };
+
+  const startPostMatchFlow = (next) => {
+    postMatchNextRef.current = next;
+    if (ftOvl?.rewardKey) {
+      setRewardOvl({ key:ftOvl.rewardKey, state:ftOvl.nextState || S, rank:ftOvl.newRank });
+      return;
+    }
+    if (ftOvl?.tierChange?.dir === "up") {
+      setTierOvl(ftOvl.tierChange);
+      return;
+    }
+    continuePostMatch();
+  };
+
   const restartMatch = async () => {
     clearTimeout(timerRef.current);
     setFtOvl(null);
+    setRewardOvl(null);
     setTierOvl(null);
-    setDemotionOvl(null);
-    setReward(null);
     setHtOvl(null);
     setMomentOvl(null);
     setResult(null);
@@ -719,8 +907,15 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setSelectedAction(null);
     setSelectedRate(null);
     setSelectedOutcome(null);
+    setResolutionReaction(null);
     setPendingTurn(null);
     setCommentary("");
+    setMatchFeed("Opening whistle. Read the first pressure.");
+    setPauseOpen(false);
+    extraTimeRef.current = false;
+    setupStartedRef.current = false;
+    setPreMatchStage("loading");
+    setSetupProgress(6);
 
     momentumRef.current  = { correct: 0, wrong: 0, state: "normal" };
     turnCountRef.current = { total: 0, correct: 0, wrong: 0 };
@@ -730,8 +925,39 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     sync(g);
 
     chainStartedRef.current = false;
-    if (dojo && account) await startChainMatch();
   };
+
+  const startExtraTime = () => {
+    const g = gRef.current;
+    if (!g) return;
+    extraTimeRef.current = true;
+    setFtOvl(null);
+    setRewardOvl(null);
+    setTierOvl(null);
+    setPauseOpen(false);
+    setSelectedAction(null);
+    setSelectedRate(null);
+    setSelectedOutcome(null);
+    setPendingTurn(null);
+    setCpuChoice(null);
+    setCommentary("");
+    setMatchFeed("Extra time begins. Four reads to break the draw.");
+    g.phase = "playing";
+    g.gs = "MIDFIELD";
+    g.midfieldSide = "home";
+    g.turn = Math.max(g.turn, MAX_TURNS + 1);
+    g.max = MAX_TURNS + 4;
+    sync(g);
+  };
+  if (preMatchStage === "loading") {
+    return (
+      <StadiumSetupScreen
+        progress={setupProgress}
+        S={S}
+        opponentName={opponentName}
+      />
+    );
+  }
 
   return (
     <MatchStadiumShell>
@@ -792,13 +1018,13 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
             <div style={{ position:"absolute", inset:0, zIndex:2, pointerEvents:"none",
               background:"radial-gradient(ellipse 88% 80% at 50% 50%, transparent 36%, rgba(0,0,0,.22) 62%, rgba(0,0,0,.56) 100%)"}}/>
             {/* ATTACK: threat aura bleeds in from right box */}
-            {false && gs === "ATTACK" && (
+            {SHOW_THREAT_AURAS && gs === "ATTACK" && (
               <div style={{ position:"absolute", right:0, top:"14%", bottom:"14%", width:"36%", zIndex:3, pointerEvents:"none",
                 background:"linear-gradient(270deg, rgba(239,68,68,.09) 0%, transparent 100%)",
                 animation:"dangerPulse 1.5s ease-in-out infinite"}}/>
             )}
             {/* DEFEND: threat aura bleeds in from left box */}
-            {false && gs === "DEFEND" && (
+            {SHOW_THREAT_AURAS && gs === "DEFEND" && (
               <div style={{ position:"absolute", left:0, top:"14%", bottom:"14%", width:"36%", zIndex:3, pointerEvents:"none",
                 background:"linear-gradient(90deg, rgba(239,68,68,.09) 0%, transparent 100%)",
                 animation:"dangerPulse 1.5s ease-in-out infinite"}}/>
@@ -817,7 +1043,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
               ` }}/>
 
             {/* Change 1+2: Pitch cue badges + zone highlights */}
-            {phase === "playing" && false && (
+            {phase === "playing" && SHOW_PITCH_CUE_BADGES && (
               <PitchCueBadges
                 context={context}
                 previewIntentId={previewIntentId}
@@ -826,7 +1052,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
               />
             )}
 
-            {false && <IntentDirectionArrow gs={gs} context={context} intentId={previewIntentId}/>}
+            {SHOW_INTENT_DIRECTION && <IntentDirectionArrow gs={gs} context={context} intentId={previewIntentId}/>}
 
             {/* Ball spotlight */}
             <div style={{ position:"absolute", zIndex:5, pointerEvents:"none",
@@ -842,7 +1068,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
                 const isActive = p.hB;
                 // Away players are never fully ghosted — they are real threats (Fix 10)
                 const isFar    = p.emphasis === "dim" && !p.tags?.includes("pressure") && (!p.hB && Math.abs(p.x-ball.x)>38);
-                return <PlayerFigure key={p.id || i} p={p} idx={i} celebrate={celebrate} gs={gs} isActive={isActive} isFar={isFar} context={context} previewIntentId={previewIntentId}/>;
+                return <PlayerFigure key={p.id || i} p={p} idx={i} celebrate={celebrate} gs={gs} isActive={isActive} isFar={isFar} context={context} previewIntentId={previewIntentId} reaction={resolutionReaction}/>;
               })}
             </div>
 
@@ -853,6 +1079,15 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
           </div>
         </div>
 
+        <div style={{
+          position:"absolute",
+          inset:0,
+          zIndex:11,
+          pointerEvents:"none",
+          background:phase === "result" ? "rgba(0,0,0,.18)" : "rgba(0,0,0,.12)",
+          transition:"background .22s ease",
+        }}/>
+
         {/* ── Fixed HUD overlays ────────────────────────────────────────── */}
 
         {/* Top gradient */}
@@ -860,7 +1095,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
         {/* Bottom gradient */}
         <div style={{ position:"absolute", left:0, right:0, bottom:0, height:"14%", zIndex:12, pointerEvents:"none", background:"linear-gradient(0deg,rgba(1,4,3,.18) 0%,rgba(3,8,5,.05) 54%,transparent 100%)" }}/>
 
-        {false && transitionOvl && (
+        {SHOW_PHASE_TRANSITION && transitionOvl && (
           <div key={transitionOvl.key} style={{ position:"absolute", inset:0, zIndex:24, pointerEvents:"none", overflow:"hidden", animation:"phaseWash 2s ease forwards" }}>
             <div style={{
               position:"absolute", inset:"-18% -30%",
@@ -906,7 +1141,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
         )}
 
         {/* CPU choice banner */}
-        {false && <CPUChoiceBanner choice={cpuChoice}/>}
+        {SHOW_CPU_BANNER && <CPUChoiceBanner choice={cpuChoice}/>}
 
         {/* Score bar */}
         <ScoreBar
@@ -921,13 +1156,69 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
           popA={popA}
         />
 
-        {/* Stat panel */}
-        <StatPanel gs={gs} stats={stats} momentum={momentumDisplay}/>
+        <div style={{
+          position:"absolute",
+          top:"64px",
+          left:"50%",
+          transform:"translateX(-50%)",
+          zIndex:25,
+          width:"min(520px, calc(100% - 44px))",
+          display:"flex",
+          justifyContent:"center",
+          pointerEvents:"none",
+        }}>
+          <div style={{
+            maxWidth:"100%",
+            padding:"5px 10px",
+            borderRadius:"999px",
+            border:"1px solid rgba(84,232,113,.18)",
+            background:"rgba(2,7,5,.58)",
+            color:"rgba(238,245,240,.68)",
+            fontFamily:"var(--f-mono)",
+            fontSize:"7px",
+            letterSpacing:".13em",
+            textTransform:"uppercase",
+            whiteSpace:"nowrap",
+            overflow:"hidden",
+            textOverflow:"ellipsis",
+            backdropFilter:"blur(10px)",
+          }}>
+            {matchFeed}
+          </div>
+        </div>
+
+        {phase !== "finished" && (
+          <button
+            type="button"
+            onClick={() => setPauseOpen(true)}
+            aria-label="Pause match"
+            style={{
+              position:"absolute",
+              top:"18px",
+              right:"18px",
+              zIndex:31,
+              width:"38px",
+              height:"38px",
+              borderRadius:"9px",
+              border:"1px solid rgba(255,255,255,.13)",
+              background:"rgba(2,7,5,.7)",
+              color:"rgba(255,255,255,.82)",
+              fontFamily:"var(--f-disp)",
+              fontSize:"18px",
+              lineHeight:1,
+              boxShadow:"0 10px 28px rgba(0,0,0,.28)",
+              backdropFilter:"blur(10px)",
+              cursor:"pointer",
+            }}
+          >
+            II
+          </button>
+        )}
 
         {/* Commentary */}
-        {false && <Commentary text={commentary}/>}
+        {SHOW_COMMENTARY_BAR && <Commentary text={commentary}/>}
 
-        {phase === "playing" && false && (
+        {phase === "playing" && SHOW_TURN_CONTEXT_LINE && (
           <div style={{
             position:"absolute",
             left:"50%",
@@ -956,7 +1247,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
           </div>
         )}
 
-        {phase === "playing" && false && (
+        {phase === "playing" && SHOW_CUE_TOGGLE && (
           <button
             type="button"
             onClick={toggleCueBadges}
@@ -998,6 +1289,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
             onContinue={continueAfterResolution}
             context={context}
             turnResult={pendingTurn?.turnResult}
+            homeClub={S.clubName || "ZAP"}
+            awayClub={opponentName}
+            score={score}
           />
         ) : (
           <ActionCards
@@ -1013,9 +1307,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
         )}
 
         {/* Result flash */}
-        {false && <ResultFlash result={!momentOvl ? result : null}/>}
+        {SHOW_RESULT_FLASH && <ResultFlash result={!momentOvl ? result : null}/>}
 
-        {false && showGuide && (
+        {SHOW_GUIDED_CUES && showGuide && (
           <GuidedCueOverlay
             turn={turn}
             cues={context?.cues || []}
@@ -1101,6 +1395,41 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
         )}
 
         {/* Half-time */}
+        {pauseOpen && (
+          <div style={{
+            position:"fixed",
+            inset:0,
+            zIndex:120,
+            display:"grid",
+            placeItems:"center",
+            padding:"18px",
+            background:"rgba(0,0,0,.62)",
+            backdropFilter:"blur(10px)",
+          }}>
+            <div style={{
+              width:"min(380px,100%)",
+              borderRadius:"16px",
+              border:"1px solid rgba(255,255,255,.13)",
+              background:"linear-gradient(180deg,rgba(7,18,11,.96),rgba(3,8,5,.98))",
+              boxShadow:"0 28px 84px rgba(0,0,0,.58)",
+              overflow:"hidden",
+            }}>
+              <div style={{ padding:"15px 16px", borderBottom:"1px solid rgba(255,255,255,.08)" }}>
+                <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".24em", color:"var(--green)", marginBottom:"6px" }}>MATCH PAUSED</div>
+                <div style={{ fontFamily:"var(--f-body)", fontSize:"13px", lineHeight:1.45, color:"rgba(238,245,240,.68)" }}>
+                  Quitting an AI match can cost progress. Quitting PVP should count as a loss once live PVP settlement is connected.
+                </div>
+              </div>
+              <div style={{ display:"grid", gap:"9px", padding:"14px" }}>
+                <button onClick={() => setPauseOpen(false)} style={{ padding:"13px", borderRadius:"10px", background:"linear-gradient(135deg,var(--green),#a3e635)", color:"var(--bg)", fontFamily:"var(--f-disp)", fontSize:"15px", letterSpacing:"1.6px", border:0 }}>RESUME</button>
+                <button onClick={restartMatch} style={{ padding:"13px", borderRadius:"10px", background:"rgba(255,255,255,.075)", color:"var(--tx)", fontFamily:"var(--f-disp)", fontSize:"14px", letterSpacing:"1.4px", border:"1px solid rgba(255,255,255,.12)" }}>RESTART MATCH</button>
+                <button onClick={() => { setPauseOpen(false); onHome(); }} style={{ padding:"13px", borderRadius:"10px", background:"rgba(248,113,113,.12)", color:"#fecaca", fontFamily:"var(--f-disp)", fontSize:"14px", letterSpacing:"1.4px", border:"1px solid rgba(248,113,113,.26)" }}>QUIT GAME</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Half-time */}
         {htOvl && (
           <HalfTime
             score={htOvl.score} S={S} matchStats={htOvl.matchStats}
@@ -1123,6 +1452,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
               setHtOvl(null);
               g.gs = "MIDFIELD";
+              g.midfieldSide = "home";
               g.turn = Math.max(g.turn, TURNS_PER_HALF + 1);
               g.phase = "playing";
               halftimeContinueRef.current = false;
@@ -1136,16 +1466,27 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
           <FullTime
             data={ftOvl} S={S} LB={LB}
             opponentName={opponentName}
-            onAgain={restartMatch}
-            onHome={() => { setFtOvl(null); setTierOvl(null); onHome(); }}
+            onExtraTime={ftOvl.draw ? startExtraTime : null}
+            onAgain={() => startPostMatchFlow(() => { setFtOvl(null); restartMatch(); })}
+            onHome={() => startPostMatchFlow(() => { setFtOvl(null); onHome(); })}
           />
         )}
 
-        {tierOvl && <TierChangeModal data={tierOvl} onClose={() => setTierOvl(null)}/>}
-        {demotionOvl && <DemotionModal fromTier={demotionOvl.fromTier} toTier={demotionOvl.toTier} newRank={demotionOvl.newRank} clubName={S.clubName} onClose={() => setDemotionOvl(null)}/>}
-      </div>
+        {rewardOvl && (
+          <RewardModal
+            cfg={{ ...(REWARDS[rewardOvl.key] || {}), rank:`#${rewardOvl.rank || "-"}` }}
+            onClaim={claimReward}
+            onSkip={claimReward}
+          />
+        )}
 
-      {reward && <RewardModal cfg={REWARDS[reward.type]} onClaim={() => claimReward(false)} onSkip={() => claimReward(true)}/>}
+        {tierOvl && (
+          <TierChangeModal
+            data={tierOvl}
+            onClose={continuePostMatch}
+          />
+        )}
+      </div>
     </div>
     </MatchStadiumShell>
   );

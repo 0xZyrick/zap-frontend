@@ -1,98 +1,190 @@
 // ─── HomeScreens.jsx ─────────────────────────────────────────────────────────
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { StadiumEnvironment } from "../pitch/pitch.jsx";
-import { ranked, myRank } from "../game/gameState.js";
+import { myRank } from "../game/gameState.js";
 import HomeStadiumBackdrop from "../ui/HomeStadiumBackdrop.jsx";
+import { createPvpRoom, getPvpRoom, joinPvpRoom, subscribePvpRooms } from "../lib/pvpRooms.js";
 import "./homeScreen.css";
+
+const PLAYER_HOME = "/assets/players/anime-home.png";
+const PLAYER_KICK = "/assets/players/anime-kickoff.png";
+const ZAP_LOGO = "/assets/logo/zap-logo.png";
+const COIN_ICON = "/assets/icons/coin.png";
+const MEDAL_ICON = "/assets/icons/medal.png";
+const RANK_ICON = "/assets/icons/rank.png";
+const LEADERBOARD_CARD_IMAGE = "/assets/announcements/leaderboard-bg.png";
+const TOURNAMENT_CARD_IMAGE = "/assets/announcements/tournament-bg.png";
+const ANNOUNCEMENT_CANDIDATES = [
+  ...Array.from({ length: 5 }, (_, i) => `/assets/announcements/announcement-${String(i + 1).padStart(2, "0")}.png`),
+];
+
+const CRESTS = {
+  derick: "/assets/crests/derick.png",
+  derickfc: "/assets/crests/derick.png",
+  elmaestro: "/assets/crests/el-maestro.png",
+  phantomxi: "/assets/crests/phantom-xi.png",
+  codmai: "/assets/crests/codmai.png",
+  skyfoot: "/assets/crests/sky-foot.png",
+  ghoststrike: "/assets/crests/ghost-strike.png",
+};
+
+function assetKey(name = "") {
+  return name
+    .toLowerCase()
+    .replace(/\bfc\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function crestSrc(name) {
+  return CRESTS[assetKey(name)] || null;
+}
+
+function ordinal(value) {
+  const n = Number(value) || 0;
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) return `${n}TH`;
+  const suffix = n % 10 === 1 ? "ST" : n % 10 === 2 ? "ND" : n % 10 === 3 ? "RD" : "TH";
+  return `${n}${suffix}`;
+}
+
+function getClubDisplay(S) {
+  const clubName = S?.clubName || "ZYRICK FC";
+  const initials = clubName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  return { clubName, initials, clubCrest: crestSrc(clubName) };
+}
+
+function buildMissions(S = {}) {
+  const total = Number(S.total || 0);
+  const wins = Number(S.wins || 0);
+  const claims = S.missionClaims || {};
+  const accuracy = total ? Math.round((wins / Math.max(total, 1)) * 100) : 0;
+  const mission = (group, id, title, desc, current, target, reward, reset = "") => {
+    const progress = Math.min(current, target);
+    const complete = progress >= target;
+    return {
+      group,
+      id,
+      title,
+      desc,
+      current: progress,
+      target,
+      reward,
+      reset,
+      complete,
+      claimed: !!claims[id],
+      pct: Math.min(100, Math.round(progress / Math.max(target, 1) * 100)),
+    };
+  };
+
+  return {
+    daily: [
+      mission("daily", "daily-play-match", "Play one match today", "Finish any match before the daily reset.", total, 1, 10, "24H"),
+      mission("daily", "daily-go-wide", "Win with Go Wide", "Win a midfield turn using the wide read.", Number(S.goWideWins || 0), 1, 5, "24H"),
+      mission("daily", "daily-no-abandon", "No abandon finish", "Complete a full match without quitting.", total, 1, 8, "24H"),
+      mission("daily", "daily-three-correct", "Three correct reads", "Read correctly three times in one match.", Number(S.bestCorrectReads || 0), 3, 12, "24H"),
+    ],
+    weekly: [
+      mission("weekly", "weekly-three-wins", "Win three matches", "Stack three wins before Monday reset.", wins, 3, 50, "MON"),
+      mission("weekly", "weekly-accuracy", "70% read accuracy", "Reach 70%+ accuracy in a single match.", Number(S.bestAccuracy || accuracy), 70, 40, "MON"),
+      mission("weekly", "weekly-five-opponents", "Five different opponents", "Play against five different rivals.", Number(S.uniqueOpponents || 0), 5, 35, "MON"),
+      mission("weekly", "weekly-in-form", "Trigger In Form", "Hit the momentum state in live play.", Number(S.inFormTriggers || 0), 1, 30, "MON"),
+    ],
+    achievements: [
+      mission("achievements", "ach-read-master", "Read Master", "Claim after 25 correct reads.", Number(S.correctReads || 0), 25, 120, "TITLE"),
+      mission("achievements", "ach-counter-caller", "Counter Caller", "Beat the opponent's read 10 times.", Number(S.counterReads || 0), 10, 90, "TITLE"),
+      mission("achievements", "ach-comeback-king", "Comeback King", "Win after trailing at half time.", Number(S.comebackWins || 0), 1, 100, "TITLE"),
+      mission("achievements", "ach-clean-sheet", "Clean Sheet Mind", "Win without conceding.", Number(S.cleanSheetWins || 0), 1, 80, "TITLE"),
+    ],
+  };
+}
+
+function hasClaimableMission(S) {
+  return Object.values(buildMissions(S)).flat().some((mission) => mission.complete && !mission.claimed);
+}
+
+export function ScreenBackButton({ onClick, label = "Back" }) {
+  return (
+    <button className="zap-screen-back" onClick={onClick} aria-label={label}>
+      <span aria-hidden="true">‹</span>
+      {label}
+    </button>
+  );
+}
+
+export function ClubhouseHeader({ S, LB = [], active = "play", onPlay, onMissions, onShop, onTeam, extraStats = null }) {
+  const { clubName, initials, clubCrest } = getClubDisplay(S);
+  const coins = S?.coins || 0;
+  const medals = S?.medals ?? S?.wins ?? 6;
+  const rank = myRank(S, LB);
+  const navItems = [
+    { id:"play", label:"PLAY", onClick:onPlay },
+    { id:"missions", label:"MISSIONS", onClick:onMissions, badge:hasClaimableMission(S) },
+    { id:"shop", label:"SHOP", onClick:onShop, disabled:!onShop },
+    { id:"team", label:"TEAM", onClick:onTeam },
+  ];
+
+  return (
+    <>
+      <header className="zap-home__header">
+        <div className="zap-home__club">
+          <div className="zap-home__crest">
+            {clubCrest ? <img src={clubCrest} alt="" draggable={false} /> : <span>{initials}</span>}
+          </div>
+          <strong>{clubName}</strong>
+        </div>
+
+        <div className="zap-home__stats" aria-label="Club stats">
+          {active === "leaderboard" && (
+            <span className="zap-home__stat"><img src={RANK_ICON} alt="" draggable={false} />{ordinal(rank)}</span>
+          )}
+          <span className="zap-home__stat zap-home__stat--coin"><img src={COIN_ICON} alt="" draggable={false} />{coins}</span>
+          <span className="zap-home__stat zap-home__stat--medal"><img src={MEDAL_ICON} alt="" draggable={false} />{medals}</span>
+          {extraStats}
+        </div>
+
+        <img className="zap-home__logo" src={ZAP_LOGO} alt="ZAP" draggable={false} />
+      </header>
+
+      {active !== "leaderboard" && (
+        <nav className="zap-home__nav" aria-label="Clubhouse">
+          {navItems.map((item) => (
+            <button
+              key={item.id}
+              className={`${item.id === active ? "is-active" : ""} ${item.badge ? "has-badge" : ""}`}
+              disabled={item.disabled}
+              onClick={item.onClick}
+            >
+              {item.label}
+              {item.badge && <span className="zap-home__nav-badge" aria-hidden="true" />}
+            </button>
+          ))}
+        </nav>
+      )}
+    </>
+  );
+}
 
 // ── SplashScreen ──────────────────────────────────────────────────────────────
 export function SplashScreen({ onEnter, loading }) {
-  const ghostPlayers = [
-    { x:18, y:31, d:0 }, { x:26, y:37, d:1 }, { x:38, y:33, d:2 },
-    { x:58, y:42, d:3 }, { x:70, y:36, d:4 }, { x:82, y:45, d:5 },
-    { x:22, y:68, d:2 }, { x:36, y:62, d:4 }, { x:64, y:70, d:1 },
-    { x:77, y:64, d:3 },
-  ];
   return (
-    <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#030a05" }}>
+    <div className="zap-splash">
       <StadiumEnvironment gs="MIDFIELD"/>
-
-      {/* layered overlays */}
-      <div style={{ position:"absolute", inset:0, background:"linear-gradient(180deg,rgba(1,6,3,.82) 0%,rgba(1,6,3,.45) 40%,rgba(1,6,3,.92) 100%)" }}/>
-      <div style={{ position:"absolute", inset:0, background:"radial-gradient(ellipse 60% 55% at 50% 48%,rgba(24,193,88,.13),transparent 68%)" }}/>
-      <div style={{ position:"absolute", left:"8%", right:"8%", top:"18%", height:"50%", opacity:.24, border:"1px solid rgba(255,255,255,.22)", borderRadius:"18px", zIndex:1 }}>
-        <div style={{ position:"absolute", inset:"10% 18%", border:"1px solid rgba(255,255,255,.16)", borderRadius:"50%" }}/>
-        <div style={{ position:"absolute", left:"50%", top:0, bottom:0, width:"1px", background:"rgba(255,255,255,.20)" }}/>
-        {ghostPlayers.map((p, i) => (
-          <i key={i} style={{
-            position:"absolute",
-            left:`${p.x}%`,
-            top:`${p.y}%`,
-            width:"5px",
-            height:"5px",
-            borderRadius:"50%",
-            background:i % 3 === 0 ? "#facc15" : i % 2 === 0 ? "#18c158" : "rgba(255,255,255,.76)",
-            boxShadow:"0 0 14px rgba(24,193,88,.45)",
-            animation:`ghostMatchDrift ${5 + (i % 4)}s ease-in-out ${p.d * .18}s infinite alternate`,
-          }}/>
-        ))}
-      </div>
-
-      {/* top bar */}
-      <div style={{ position:"absolute", top:0, left:0, right:0, padding:"16px 20px", display:"flex", alignItems:"center", justifyContent:"space-between", zIndex:2 }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"8px" }}>
-          <div style={{ width:"7px", height:"7px", borderRadius:"50%", background:"#18c158", boxShadow:"0 0 10px #18c158" }}/>
-          <span style={{ fontFamily:"var(--f-disp)", fontSize:"18px", letterSpacing:".18em", color:"#facc15", textShadow:"0 0 20px rgba(250,204,21,.28)" }}>MATCHDAY 05 · LIVE</span>
-        </div>
-        <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".2em", color:"rgba(255,255,255,.22)" }}>SEASON 1</div>
-      </div>
-
-      {/* main content */}
-      <div style={{ position:"absolute", inset:0, zIndex:2, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px", textAlign:"center" }}>
-
-        {/* wordmark */}
-        <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".42em", color:"rgba(24,193,88,.6)", marginBottom:"12px", textTransform:"uppercase" }}>ZAP</div>
-
-        <div style={{ fontFamily:"var(--f-disp)", fontSize:"clamp(88px,20vw,168px)", letterSpacing:"4px", lineHeight:.8, color:"#fff", textShadow:"0 0 80px rgba(24,193,88,.22)", marginBottom:"6px" }}>
-          ZAP
-        </div>
-        <div style={{ height:"10px", marginBottom:"28px" }} />
-
-        <div style={{ maxWidth:"320px", fontFamily:"var(--f-body)", fontSize:"13px", lineHeight:1.6, color:"rgba(238,245,240,.5)", marginBottom:"36px" }}>
-          You're not playing the pitch.<br/>You're playing the person reading it.
-        </div>
-
-        {/* CTA */}
+      <div className="zap-splash__wash" />
+      <img className="zap-splash__player" src={PLAYER_HOME} alt="" draggable={false} />
+      <div className="zap-splash__mark">
+        <img className="zap-splash__logo" src={ZAP_LOGO} alt="ZAP" draggable={false} />
+        <div className="zap-splash__line" />
+        <h1>WORLD FIRST<br/>ONCHAIN FOOTBALL</h1>
+        <p>Read the pressure. Pick the intent. Own the match.</p>
         <button
           onClick={onEnter}
           disabled={loading}
-          style={{
-            padding:"18px 54px",
-            borderRadius:"10px",
-            background: loading ? "rgba(24,193,88,.3)" : "#18c158",
-            color: loading ? "rgba(0,0,0,.5)" : "#020a04",
-            fontFamily:"var(--f-disp)",
-            fontSize:"20px",
-            letterSpacing:"3px",
-            boxShadow: loading ? "none" : "0 0 48px rgba(24,193,88,.45), 0 12px 0 rgba(4,76,34,.9), 0 24px 42px rgba(0,0,0,.55)",
-            border:"1px solid rgba(220,255,220,.28)",
-            cursor: loading ? "not-allowed" : "pointer",
-            transition:"all .18s",
-          }}
+          className="zap-splash__cta"
         >
-          {loading ? "LOADING…" : "ENTER CLUBHOUSE"}
+          {loading ? "LOADING..." : "ENTER CLUBHOUSE"}
         </button>
-
-        {/* feature pills */}
-        <div style={{ display:"flex", gap:"8px", marginTop:"24px", flexWrap:"wrap", justifyContent:"center" }}>
-          {["FORMATION","MARKET","LEADERBOARD","ON-CHAIN"].map(f => (
-            <span key={f} style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".16em", color:"rgba(255,255,255,.28)", padding:"4px 10px", border:"1px solid rgba(255,255,255,.08)", borderRadius:"999px" }}>{f}</span>
-          ))}
-        </div>
       </div>
-
-      {/* bottom grass fade */}
-      <div style={{ position:"absolute", bottom:0, left:0, right:0, height:"30%", background:"linear-gradient(0deg,rgba(1,6,3,.95),transparent)", zIndex:1 }}/>
+      <div className="zap-splash__fineprint">SEASON 1 ACCESS</div>
     </div>
   );
 }
@@ -121,7 +213,7 @@ export function CreateClubScreen({ initialName = "", onCreate }) {
   };
 
   return (
-    <div style={{ position:"absolute", inset:0, overflow:"hidden", background:"#030a05" }}>
+    <div className="club-reveal-screen" style={{ position:"absolute", inset:0, overflow:"hidden", background:"#030a05" }}>
       <StadiumEnvironment gs="MIDFIELD"/>
       <div style={{ position:"absolute", inset:0, background:"linear-gradient(160deg,rgba(1,6,3,.92) 0%,rgba(1,6,3,.6) 50%,rgba(1,6,3,.96) 100%)" }}/>
       <div style={{ position:"absolute", inset:0, background:"radial-gradient(ellipse 50% 60% at 30% 50%,rgba(24,193,88,.12),transparent 65%)" }}/>
@@ -188,6 +280,7 @@ export function CreateClubScreen({ initialName = "", onCreate }) {
               fontFamily:"var(--f-disp)",
               fontSize:"24px",
               letterSpacing:"1px",
+              animation:"clubCrestReveal .8s cubic-bezier(.2,.86,.2,1)",
             }}>{shortName}</div>
             <div style={{ minWidth:0 }}>
               <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".18em", color:"rgba(24,193,88,.62)", marginBottom:"5px" }}>CLUB PREVIEW</div>
@@ -232,85 +325,30 @@ export function CreateClubScreen({ initialName = "", onCreate }) {
   );
 }
 
-// ── StatPill ─── tiny helper ──────────────────────────────────────────────────
-function StatPill({ label, value, color }) {
-  return (
-    <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"3px" }}>
-      <div style={{ fontFamily:"var(--f-disp)", fontSize:"28px", lineHeight:1, color: color || "#fff" }}>{value}</div>
-      <div style={{ fontFamily:"var(--f-mono)", fontSize:"6px", letterSpacing:".16em", color:"rgba(255,255,255,.3)" }}>{label}</div>
-    </div>
-  );
-}
-
-function MiniFormation({ formationId = "control-433" }) {
-  const shapes = {
-    "press-433": [[18,50],[36,25],[35,42],[35,58],[36,75],[52,38],[52,62],[68,28],[70,50],[68,72],[84,50]],
-    "control-433": [[18,50],[35,25],[34,42],[34,58],[35,75],[50,50],[58,34],[58,66],[73,28],[76,50],[73,72]],
-    "pivot-4231": [[18,50],[34,24],[34,42],[34,58],[34,76],[49,42],[49,58],[64,28],[66,50],[64,72],[82,50]],
-    "classic-442": [[18,50],[34,25],[34,42],[34,58],[34,75],[52,28],[51,44],[51,56],[52,72],[78,42],[78,58]],
-    "diamond-41212": [[18,50],[34,25],[34,42],[34,58],[34,75],[49,50],[60,38],[60,62],[70,50],[82,42],[82,58]],
-    "wide-352": [[18,50],[34,36],[34,50],[34,64],[51,20],[52,40],[52,60],[51,80],[70,50],[84,42],[84,58]],
-    "storm-343": [[18,50],[34,36],[34,50],[34,64],[54,28],[54,50],[54,72],[73,24],[76,50],[73,76],[88,50]],
-    "lock-532": [[18,50],[32,18],[32,34],[32,50],[32,66],[32,82],[54,35],[54,50],[54,65],[78,43],[78,57]],
-    "low-541": [[18,50],[30,18],[30,34],[30,50],[30,66],[30,82],[52,24],[52,42],[52,58],[52,76],[78,50]],
-  };
-  const points = shapes[formationId] || shapes["control-433"];
-
-  return (
-    <div className="home-formation-oval" aria-hidden="true">
-      <div className="home-formation-oval__line" />
-      {points.map(([x, y], i) => (
-        <span
-          key={`${formationId}-${i}`}
-          className={i === 0 ? "is-keeper" : i > 7 ? "is-forward" : ""}
-          style={{ left:`${x}%`, top:`${y}%`, transitionDelay:`${i * 18}ms` }}
-        />
-      ))}
-    </div>
-  );
-}
-
 // ── HomeScreen ─────────────────────────────────────────────────────────────────
-export function HomeScreen({ S, LB = [], onKickOff, onLB, onMarket }) {
-  const rep    = S?.rep    || 0;
-  const coins  = S?.coins  || 0;
-  const wins   = S?.wins   || 0;
-  const draws  = S?.draws  || 0;
-  const losses = S?.losses || 0;
-  const played = wins + draws + losses;
-  const pct    = Math.max(2, Math.min(100, rep / 200 * 100));
-  const repCol = rep >= 100 ? "#facc15" : rep >= 50 ? "#22c55e" : "#f97316";
-  const clubName = S?.clubName || "ZYRICK FC";
-  const initials = clubName.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
-  const form = (S?.recentResults || []).slice(-5);
-  const FORM_COL = { W:"#22c55e", D:"#facc15", L:"#ef4444" };
-  const table = ranked(S, LB);
-  const rank = myRank(S, LB);
-  const leaders = table.slice(0, 4);
-  const nextTarget = table.find((team) => team.rank === Math.max(1, rank - 1));
-  const lastDelta = S?.lastDelta || 0;
-  const clubBase = clubName.replace(/\s+FC$/i, "");
-  const boosts = [
-    { label:"ATK", value:S?.atkBoost || 0 },
-    { label:"MID", value:S?.midBoost || 0 },
-    { label:"DEF", value:S?.defBoost || 0 },
-  ];
+export function HomeScreen({ S, LB = [], onKickOff, onLB, onMissions, onShop, onTeam }) {
+  const [announcementImages, setAnnouncementImages] = useState(ANNOUNCEMENT_CANDIDATES);
+  const [announcementIndex, setAnnouncementIndex] = useState(0);
+  const visibleAnnouncements = announcementImages.length ? announcementImages : ["/assets/announcements/announcement-01.png"];
+  const activeAnnouncement = visibleAnnouncements[announcementIndex % visibleAnnouncements.length];
+  const nextAnnouncement = visibleAnnouncements[(announcementIndex + 1) % visibleAnnouncements.length];
+  const removeMissingAnnouncement = (src) => {
+    setAnnouncementImages((items) => items.length > 1 ? items.filter((item) => item !== src) : items);
+  };
 
-  const repLabel = rep >= 200
-    ? "Elite status"
-    : rep >= 100
-      ? "Climbing fast"
-      : rep >= 50
-        ? "Building momentum"
-        : rep >= 20
-          ? "Pressure rising"
-          : "Fresh save";
+  useEffect(() => {
+    setAnnouncementIndex((index) => index % Math.max(visibleAnnouncements.length, 1));
+  }, [visibleAnnouncements.length]);
 
-  const highlights = [
-    { tag:"LIVE", text:`${clubBase} enter matchday ranked #${rank}` },
-    { tag:"TARGET", text:nextTarget ? `Catch ${nextTarget.name}` : "Protect first place" },
-    { tag:"MARKET", text:coins >= 40 ? "Squad move available" : "Coins needed" },
-  ];
+  useEffect(() => {
+    if (visibleAnnouncements.length <= 1) return undefined;
+    const nextTimer = window.setTimeout(() => {
+      setAnnouncementIndex((index) => (index + 1) % visibleAnnouncements.length);
+    }, 18000);
+    return () => {
+      window.clearTimeout(nextTimer);
+    };
+  }, [announcementIndex, visibleAnnouncements.length]);
 
   return (
     <HomeStadiumBackdrop>
@@ -322,162 +360,377 @@ export function HomeScreen({ S, LB = [], onKickOff, onLB, onMarket }) {
         </div>
       </div>
 
-      <main className="home-ui">
-        <header className="home-topbar">
-          <div className="home-club-chip">
-            <div className="home-club-crest">{initials}</div>
-            <div>
-              <div className="home-club-name">{clubName}</div>
-              <div className="home-club-mode">MANAGER MODE</div>
-            </div>
+      <main className="zap-home">
+        <ClubhouseHeader S={S} LB={LB} active="play" onPlay={onKickOff} onMissions={onMissions} onShop={onShop} onTeam={onTeam} />
+
+        <section className="zap-home__cards">
+          <div className="zap-home__slider" aria-hidden="true">
+            <article className="zap-home-card zap-home-card--tournament" key={activeAnnouncement}>
+              <img
+                className="zap-home-card__banner-img zap-home-card__banner-img--current"
+                src={activeAnnouncement}
+                alt=""
+                draggable={false}
+                decoding="async"
+                onError={() => removeMissingAnnouncement(activeAnnouncement)}
+              />
+              {visibleAnnouncements.length > 1 && (
+                <img
+                  className="zap-home-card__banner-img zap-home-card__banner-img--next"
+                  src={nextAnnouncement}
+                  alt=""
+                  draggable={false}
+                  decoding="async"
+                  onError={() => removeMissingAnnouncement(nextAnnouncement)}
+                />
+              )}
+            </article>
           </div>
 
-          <div className="home-topbar__right">
-            <div className="home-rank-pill">
-              <strong>#{rank}</strong>
-              <span>TABLE</span>
+          <button className="zap-home-card zap-home-card--kickoff" onClick={onKickOff}>
+            <div className="zap-home-card__tab-media">
+              <img className="zap-home-card__kick-img" src={PLAYER_KICK} alt="" draggable={false} decoding="async" />
             </div>
-            <div className="home-coin-pill">
-              <strong>{coins}</strong>
-              <span>COINS</span>
+            <div className="zap-home-card__tab-copy">
+              <h2>KICK OFF</h2>
+              <p>Quick match with single or multiplayer mode.</p>
+              <span>START MATCH</span>
             </div>
-          </div>
-        </header>
+          </button>
 
-        <section className="home-layout">
-          <aside className="home-command-panel home-glass-card">
-            <div className="home-command-panel__headline">
-              <span className="home-eyebrow">MATCHDAY CONTROL</span>
-              <h1>{clubBase}</h1>
-              <p>{repLabel}</p>
+          <button className="zap-home-card zap-home-card--leaderboard" onClick={onLB}>
+            <div className="zap-home-card__tab-media">
+              <img
+                className="zap-home-card__side-img"
+                src={LEADERBOARD_CARD_IMAGE}
+                alt=""
+                draggable={false}
+                decoding="async"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
             </div>
-
-            <div className="home-command-stats">
-              <div>
-                <span>Rank</span>
-                <strong>#{rank}</strong>
-              </div>
-              <div>
-                <span>Rep</span>
-                <strong>{rep}</strong>
-              </div>
-              <div>
-                <span>Coins</span>
-                <strong>{coins}</strong>
-              </div>
+            <div className="zap-home-card__tab-copy">
+              <h2>LEADERBOARD</h2>
+              <p>The table doesn't lie. Every read recorded.</p>
+              <span>CHECK THE RACE</span>
             </div>
+          </button>
 
-            <div className="home-boost-row">
-              {boosts.map((item) => (
-                <div key={item.label}>
-                  <span>{item.label}</span>
-                  <strong>{item.value >= 0 ? `+${item.value}` : item.value}</strong>
-                </div>
-              ))}
+          <button className="zap-home-card zap-home-card--leaderboard zap-home-card--tournament-tab is-locked" disabled>
+            <div className="zap-home-card__tab-media">
+              <img
+                className="zap-home-card__side-img"
+                src={TOURNAMENT_CARD_IMAGE}
+                alt=""
+                draggable={false}
+                decoding="async"
+                onError={(e) => { e.currentTarget.style.display = "none"; }}
+              />
             </div>
-
-            <div className="home-rep-card" style={{ "--rep-color": repCol, "--rep-width": `${pct}%` }}>
-              <div className="home-panel-head">
-                <span className="home-eyebrow">CLUB PULSE</span>
-                <strong>{rep}</strong>
-              </div>
-              <div className="home-rep-track"><i /></div>
+            <div className="zap-home-card__tab-copy">
+              <h2>TOURNAMENT</h2>
+              <p>Bracket play and champion runs are being prepared.</p>
+              <span>COMING SOON</span>
             </div>
-          </aside>
+          </button>
 
-          <article className="home-broadcast home-glass-card">
-            <div className="home-broadcast__top">
-              <div>
-                <span className="home-eyebrow">LIVE TACTICAL FEED</span>
-                <strong>{nextTarget ? `Next chase: ${nextTarget.name}` : "Top of the table"}</strong>
-              </div>
-              <b>ON AIR</b>
-            </div>
-
-            <div className="home-feed-screen">
-              <div className="home-feed-screen__pitch" />
-                <MiniFormation formationId={S?.formationId} />
-              <div className="home-feed-screen__scan" />
-            </div>
-
-            <div className="home-broadcast__bottom">
-              <div className="home-highlight-strip">
-                {highlights.map((item) => (
-                  <div key={item.tag}>
-                    <span>{item.tag}</span>
-                    <strong>{item.text}</strong>
-                  </div>
-                ))}
-              </div>
-              <button onClick={onKickOff} className="home-kickoff-btn">
-                <span>Kick Off</span>
-                <b>Start Match</b>
-              </button>
-            </div>
-          </article>
-
-          <aside className="home-side-stack">
-            <section className="home-table-panel home-glass-card">
-              <div className="home-panel-head">
-                <span className="home-eyebrow">LEADERBOARD</span>
-                <button onClick={onLB}>Table</button>
-              </div>
-              <div className="home-leaders">
-                {leaders.map((team) => (
-                  <div key={`${team.id}-${team.name}`} className={team.cpu ? "" : "is-you"}>
-                    <span>#{team.rank}</span>
-                    <strong>{team.name}</strong>
-                    <b>{team.pts}</b>
-                  </div>
-                ))}
-              </div>
-              <div className="home-table-note">
-                {lastDelta > 0 ? `+${lastDelta} last result` : lastDelta < 0 ? `${lastDelta} last result` : "No recent movement"}
-              </div>
-            </section>
-
-            <section className="home-stats-strip home-glass-card">
-              <div className="home-stat-tile">
-                <span>P</span>
-                <strong>{played}</strong>
-              </div>
-              <div className="home-stat-tile">
-                <span>W</span>
-                <strong className="is-green">{wins}</strong>
-              </div>
-              <div className="home-stat-tile">
-                <span>D</span>
-                <strong className="is-yellow">{draws}</strong>
-              </div>
-              <div className="home-stat-tile">
-                <span>L</span>
-                <strong className="is-red">{losses}</strong>
-              </div>
-              <div className="home-form-guide">
-                <span>Form</span>
-                <div>
-                  {(form.length ? form : ["W", "D", "L", "W", "W"]).map((r, i) => (
-                    <b key={`${r}-${i}`} style={{ background: FORM_COL[r] || "rgba(255,255,255,.14)" }}>{r}</b>
-                  ))}
-                </div>
-              </div>
-            </section>
-
-            <div className="home-action-row">
-              <button onClick={onMarket} className="home-action-card home-action-card--market home-glass-card">
-                <span>Market</span>
-                <strong>Upgrade XI</strong>
-                <b>+</b>
-              </button>
-
-              <button onClick={onLB} className="home-action-card home-action-card--table home-glass-card">
-                <span>Table</span>
-                <strong>Race</strong>
-                <b>#</b>
-              </button>
-            </div>
-          </aside>
         </section>
+      </main>
+    </HomeStadiumBackdrop>
+  );
+}
+
+function PvpRoomModal({ S, onClose, onPaired }) {
+  const [step, setStep] = useState("menu");
+  const [room, setRoom] = useState(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const clubName = S?.clubName || "ZAP FC";
+  const player = {
+    id: S?.wallet || `local-${clubName}`,
+    clubName,
+    rep: S?.rep || 50,
+  };
+
+  useEffect(() => {
+    if (!room?.code) return undefined;
+    return subscribePvpRooms(() => {
+      const latest = getPvpRoom(room.code);
+      if (latest) setRoom(latest);
+    });
+  }, [room?.code]);
+
+  const create = () => {
+    setError("");
+    setRoom(createPvpRoom(player));
+    setStep("created");
+  };
+
+  const join = () => {
+    setError("");
+    const result = joinPvpRoom(code, player);
+    if (result.error) {
+      setError(result.error);
+      return;
+    }
+    setRoom(result.room);
+    setStep("joined");
+  };
+
+  const paired = room?.status === "paired";
+  const opponent = room?.host?.id === player.id ? room?.guest : room?.host;
+
+  return (
+    <div className="zap-modal-backdrop">
+      <div className="pvp-room-modal">
+        <button className="pvp-room-modal__close" onClick={onClose} aria-label="Close">×</button>
+        <div className="pvp-room-modal__eyebrow">PVP ROOM</div>
+        <h2>{step === "menu" ? "Set up a private match" : paired ? "Rival paired" : "Waiting for rival"}</h2>
+        {step === "menu" && (
+          <p className="pvp-room-modal__warning">PVP is still in build. Rooms work for pairing, while live settlement and anti-cheat are still being connected.</p>
+        )}
+
+        {step === "menu" && (
+          <div className="pvp-room-modal__choices">
+            <button onClick={create}>
+              <strong>Create room</strong>
+              <span>Open a private room and wait for one rival.</span>
+            </button>
+            <button onClick={() => setStep("join")}>
+              <strong>Join room</strong>
+              <span>Use the room code from your rival.</span>
+            </button>
+          </div>
+        )}
+
+        {step === "join" && (
+          <div className="pvp-room-modal__join">
+            <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="ROOM CODE" />
+            {error && <p>{error}</p>}
+            <div className="pvp-room-modal__actions">
+              <button onClick={() => setStep("menu")}>Back</button>
+              <button onClick={join}>Join</button>
+            </div>
+          </div>
+        )}
+
+        {room && step !== "join" && (
+          <div className="pvp-room-modal__status">
+            <div>
+              <span>ROOM CODE</span>
+              <strong>{room.code}</strong>
+            </div>
+            <div>
+              <span>STATUS</span>
+              <strong>{paired ? "PAIRED" : "OPEN"}</strong>
+            </div>
+            <p>{paired ? `${opponent?.clubName || "Rival"} is in the room.` : "Share this code only with the player you want to face."}</p>
+            <button disabled>
+              {paired ? "MATCH LAUNCH LOCKED" : "Waiting..."}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function ModeSelectionScreen({ S, onSinglePlayer, onPvp, onBack }) {
+  const [pvpOpen, setPvpOpen] = useState(false);
+  const modeCards = [
+    {
+      id:"pvp",
+      title:"PvP Category",
+      body:"Create or join a private room against another user.",
+      enabled:true,
+      icon:"pvp",
+      action:() => setPvpOpen(true),
+    },
+    {
+      id:"single",
+      title:"VS AI Category",
+      body:"Play against the AI and climb your read rating.",
+      enabled:true,
+      icon:"ai",
+      action:onSinglePlayer,
+    },
+    {
+      id:"spectator",
+      title:"Spectator Category",
+      body:"Watch other users play when live rooms open.",
+      enabled:false,
+      icon:"spectator",
+    },
+  ];
+
+  return (
+    <HomeStadiumBackdrop>
+      <div className="mode-select">
+        <ScreenBackButton onClick={onBack} />
+
+        <section className="mode-select__stage" aria-label="Kick off modes">
+          {modeCards.map((mode, index) => {
+            const positionClass = index === 0 ? "is-left" : index === 1 ? "is-active" : "is-right";
+            return (
+            <button
+              key={mode.id}
+              type="button"
+              onClick={() => {
+                if (!mode.enabled) return;
+                mode.action?.();
+              }}
+              className={`mode-choice ${positionClass} ${mode.enabled ? "" : "is-disabled"}`}
+            >
+              <span className={`mode-choice__icon mode-choice__icon--${mode.icon}`} aria-hidden="true" />
+              <div className="mode-choice__copy">
+                <strong>{mode.title}</strong>
+                <p>{mode.body}</p>
+              </div>
+              <b>{mode.enabled ? "SELECT" : "LOCKED"}</b>
+            </button>
+            );
+          })}
+        </section>
+
+        {pvpOpen && (
+          <PvpRoomModal
+            S={S}
+            onClose={() => setPvpOpen(false)}
+            onPaired={(room) => {
+              setPvpOpen(false);
+              onPvp?.(room);
+            }}
+          />
+        )}
+      </div>
+    </HomeStadiumBackdrop>
+  );
+}
+
+export function MissionsScreen({ S, onPlay, onShop, onTeam, onClaimMission }) {
+  const [activeTab, setActiveTab] = useState("daily");
+  const missionGroups = buildMissions(S);
+  const tabs = [
+    { id:"daily", label:"DAILY" },
+    { id:"weekly", label:"WEEKLY" },
+    { id:"achievements", label:"ACHIEVEMENTS" },
+  ];
+  const activeMissions = missionGroups[activeTab] || missionGroups.daily;
+
+  return (
+    <HomeStadiumBackdrop>
+      <main className="missions-screen">
+        <ClubhouseHeader S={S} active="missions" onPlay={onPlay} onMissions={() => {}} onShop={onShop} onTeam={onTeam} />
+
+        <section className="missions-panel">
+          <nav className="missions-tabs" aria-label="Mission types">
+            {tabs.map((tab) => {
+              const claimable = (missionGroups[tab.id] || []).some((mission) => mission.complete && !mission.claimed);
+              return (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className={`${activeTab === tab.id ? "is-active" : ""} ${claimable ? "has-claim" : ""}`}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              );
+            })}
+          </nav>
+
+          <div className="missions-list">
+            {activeMissions.map((mission) => {
+              const claimable = mission.complete && !mission.claimed;
+              return (
+                <article
+                  key={mission.id}
+                  className={`mission-row ${mission.complete ? "is-complete" : "is-active"} ${mission.claimed ? "is-claimed" : ""} ${claimable ? "is-claimable" : ""}`}
+                >
+                  {activeTab === "achievements" && (
+                    <span className="mission-row__badge" aria-hidden="true">
+                      <img src={MEDAL_ICON} alt="" draggable={false} />
+                    </span>
+                  )}
+                  <div className="mission-row__copy">
+                    <span>{mission.reset}</span>
+                    <h2>{mission.title}</h2>
+                    <p>{mission.desc}</p>
+                  </div>
+                  <div className="mission-row__progress">
+                    <div className="mission-row__progress-head">
+                      <span>{mission.current}/{mission.target}</span>
+                      <strong>+{mission.reward} REP</strong>
+                    </div>
+                    <div className="mission-row__bar" aria-hidden="true">
+                      <i style={{ width:`${mission.pct}%` }} />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!claimable}
+                    onClick={() => onClaimMission?.(mission)}
+                  >
+                    {mission.claimed ? "CLAIMED" : claimable ? "CLAIM" : "ACTIVE"}
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+      </main>
+    </HomeStadiumBackdrop>
+  );
+}
+
+export function ShopScreen({ S, onPlay, onMissions, onTeam, onRequestCrest }) {
+  const [requesting, setRequesting] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const clubName = S?.clubName || "ZAP FC";
+  const requested = !!S?.crestRequested || !!S?.crestRequestPending;
+  const crestComingSoon = true;
+
+  const requestCrest = async () => {
+    if (requesting || requested) return;
+    setRequesting(true);
+    try {
+      await onRequestCrest?.({ clubName, wallet:S?.wallet || "local", cost:"TBD STRK" });
+    } finally {
+      setRequesting(false);
+      setConfirmOpen(false);
+    }
+  };
+
+  return (
+    <HomeStadiumBackdrop>
+      <main className="missions-screen">
+        <ClubhouseHeader S={S} active="shop" onPlay={onPlay} onMissions={onMissions} onShop={() => {}} onTeam={onTeam} />
+        <section className="shop-screen__panel">
+          <div>
+            <span>CREST REQUEST</span>
+            <h2>Your club. Your crest. Onchain forever.</h2>
+            <p>Request custom crest generation for {clubName}. Price is $3 paid in STRK once payment wiring is live.</p>
+          </div>
+          <button onClick={() => setConfirmOpen(true)} disabled={crestComingSoon || requesting || requested}>
+            {crestComingSoon ? "COMING SOON" : requested ? "CREST REQUESTED" : requesting ? "REQUESTING..." : "REQUEST CREST · $3 IN STRK"}
+          </button>
+        </section>
+
+        {confirmOpen && (
+          <div className="zap-modal-backdrop">
+            <div className="crest-confirm-modal">
+              <div className="crest-confirm-modal__eyebrow">CREST REQUEST</div>
+              <h2>Confirm custom crest</h2>
+              <p>{clubName} will be queued for a custom crest request. The target price is $3 in STRK.</p>
+              <div className="crest-confirm-modal__actions">
+                <button type="button" onClick={() => setConfirmOpen(false)}>Cancel</button>
+                <button type="button" onClick={requestCrest} disabled={requesting}>
+                  {requesting ? "Sending..." : "Confirm request"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </HomeStadiumBackdrop>
   );

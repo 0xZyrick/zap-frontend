@@ -3,7 +3,7 @@
 
 import {
   ACTION_MODS, CPU_ACTIONS, MATCHUP_MODS, MATCHUP_NARR,
-  TRANS, COMM, SITS, RW, CW, INTENTS, OPPONENT_INTENTS, TURN_SITUATIONS,
+  TRANS, COMM, SITS, RW, CW, INTENTS, OPPONENT_INTENTS, TURN_SITUATIONS, SCENES,
   CUE_FEEDBACK, FORMATION_INTENTS, CUE_LABELS, getOpponentProfile, getPlayerPose,
 } from "./constants.js";
 
@@ -70,7 +70,7 @@ const CANONICAL_READS = {
     matrix: {
       slip_pass: { beats: "hold_shape", losesTo: "step_up" },
       finish: { beats: "step_up", losesTo: "block_shot" },
-      hold_wait: { beats: "block_shot", losesTo: "hold_shape" },
+      hold_wait: { beats: "step_up", losesTo: "hold_shape" },
     },
   },
   DEFEND: {
@@ -78,11 +78,53 @@ const CANONICAL_READS = {
     opponent: ["slip_pass", "finish", "hold_wait"],
     matrix: {
       hold_line: { beats: "hold_wait", losesTo: "slip_pass" },
-      step_in: { beats: "slip_pass", losesTo: "finish" },
-      press_ball: { beats: "finish", losesTo: "hold_wait" },
+      step_in: { beats: "slip_pass", losesTo: "hold_wait" },
+      press_ball: { beats: "finish", losesTo: "slip_pass" },
     },
   },
 };
+
+const MIDFIELD_DEFENCE_READS = {
+  player: ["press_middle", "cover_wide", "drop_off"],
+  opponent: ["drive_on", "go_wide", "go_long"],
+  matrix: {
+    press_middle: { beats: "drive_on", losesTo: "go_wide" },
+    cover_wide: { beats: "go_long", losesTo: "go_wide" },
+    drop_off: { beats: "go_wide", losesTo: "go_long" },
+  },
+};
+
+const swapPlayerId = (id) => {
+  const map = {
+    h_gk:"a_gk", h_lb:"a_lb", h_cb1:"a_cb1", h_cb2:"a_cb2", h_rb:"a_rb",
+    h_dm:"a_dm", h_cm:"a_cm", h_am:"a_cm", h_lw:"a_lm", h_rw:"a_rm", h_st:"a_st1",
+    a_gk:"h_gk", a_lb:"h_lb", a_cb1:"h_cb1", a_cb2:"h_cb2", a_rb:"h_rb",
+    a_dm:"h_dm", a_cm:"h_cm", a_lm:"h_lw", a_rm:"h_rw", a_st1:"h_st", a_st2:"h_st", a_st:"h_st",
+  };
+  return map[id] || id;
+};
+
+const swapIds = (ids = []) => ids.map(swapPlayerId);
+
+const opponentMidfieldSituation = (situation) => ({
+  ...situation,
+  id: `${situation.id}_opponent`,
+  title: "Defend Midfield",
+  summary: "They restart through midfield. Stop the move before it becomes a full attack.",
+  ballCarrierId: swapPlayerId(situation.ballCarrierId),
+  activePlayerIds: swapIds(situation.activePlayerIds),
+  supportOptionIds: swapIds(situation.supportOptionIds),
+  pressurePlayerIds: swapIds(situation.pressurePlayerIds),
+  openPlayerIds: swapIds(situation.openPlayerIds),
+  routePreview: situation.routePreview
+    ? {
+        ...situation.routePreview,
+        from: swapPlayerId(situation.routePreview.from),
+        to: swapPlayerId(situation.routePreview.to),
+        label: "opponent move",
+      }
+    : null,
+});
 
 // ─── Player layout ────────────────────────────────────────────────────────────
 const PHASE_PLAYER_LAYOUTS = {
@@ -151,7 +193,45 @@ const normalizeCueLabel = (cue) => {
   return { ...cue, label };
 };
 
-const withSituationAdjustments = (players, situation) => {
+const buildScenePositions = (players, situation, phase, sceneIndex) => {
+  if (situation?.positions) return situation.positions;
+
+  const scene = SCENES?.[phase]?.[sceneIndex % (SCENES?.[phase]?.length || 1)];
+  if (!scene?.length) return null;
+
+  const byId = (id) => players.find(p => p.id === id) || null;
+  const first = (ids = [], test = () => true, used = new Set()) =>
+    ids.map(byId).find(p => p && test(p) && !used.has(p.id)) || null;
+  const used = new Set();
+  const carrier = byId(situation.ballCarrierId) || players[0];
+  const slots = [];
+
+  if (carrier) {
+    slots.push(carrier);
+    used.add(carrier.id);
+  }
+
+  const home = p => p.id.startsWith("h_");
+  const away = p => p.id.startsWith("a_");
+  const supportHome = first(situation.supportOptionIds, home, used) || first(situation.activePlayerIds, home, used);
+  if (supportHome) { slots.push(supportHome); used.add(supportHome.id); }
+
+  const openHome = first(situation.openPlayerIds, home, used) || first(situation.supportOptionIds, home, used) || first(situation.activePlayerIds, home, used);
+  if (openHome) { slots.push(openHome); used.add(openHome.id); }
+
+  const pressureAway = first(situation.pressurePlayerIds, away, used) || first(situation.activePlayerIds, away, used);
+  if (pressureAway) { slots.push(pressureAway); used.add(pressureAway.id); }
+
+  const secondAway = first([...(situation.openPlayerIds || []), ...(situation.activePlayerIds || []), ...(situation.pressurePlayerIds || [])], away, used);
+  if (secondAway) { slots.push(secondAway); used.add(secondAway.id); }
+
+  return slots.reduce((acc, player, idx) => {
+    if (scene[idx]) acc[player.id] = scene[idx];
+    return acc;
+  }, {});
+};
+
+const withSituationAdjustments = (players, situation, phase = "MIDFIELD", sceneIndex = 0) => {
   const cues = cueIds(situation);
   const ballBase = players.find(p => p.id === situation.ballCarrierId) || null;
   const pressureIds = new Set(situation.pressurePlayerIds || []);
@@ -166,6 +246,7 @@ const withSituationAdjustments = (players, situation) => {
   const hasLongChannel = cues.has("long_lane");
   const hasDangerRun = cues.has("danger_run");
   const hasSpaceBehind = cues.has("space_behind");
+  const authoredPositions = buildScenePositions(players, situation, phase, sceneIndex);
 
   const clampPt = (x, y) => ({
     x: clamp(x, 4, 96),
@@ -236,6 +317,28 @@ const withSituationAdjustments = (players, situation) => {
       angle = 7;
     }
 
+    if (phase === "MIDFIELD" && homeCarrier && home && p.id !== situation.ballCarrierId && !authoredPositions?.[p.id]) {
+      const wideSide = situation.openSide === "left" ? -1 : 1;
+      if (p.role === "ST") {
+        const pt = clampPt(carrier.x + 28, carrier.y - 7);
+        x = pt.x; y = pt.y; runDir = 1; angle = -4;
+      } else if (["RW", "LW", "RB", "LB", "RM", "LM"].includes(p.role)) {
+        const pt = clampPt(carrier.x + 20, wideSide > 0 ? 78 : 22);
+        x = pt.x; y = pt.y; runDir = 1; angle = wideSide > 0 ? -5 : 5;
+      } else if (["AM", "CM", "DM"].includes(p.role)) {
+        const pt = clampPt(carrier.x + 13, carrier.y + (carrier.y > 52 ? -10 : 10));
+        x = pt.x; y = pt.y;
+      }
+    }
+
+    if (authoredPositions?.[p.id]) {
+      const pos = authoredPositions[p.id];
+      x = pos.x ?? x;
+      y = pos.y ?? y;
+      angle = pos.angle ?? angle;
+      runDir = pos.runDir ?? runDir;
+    }
+
     return { ...p, x, y, angle, runDir };
   };
 
@@ -260,9 +363,143 @@ const withSituationAdjustments = (players, situation) => {
       hB: isBall,
       tags,
       emphasis: isBall || ids.active.has(p.id) || ids.support.has(p.id) || ids.pressure.has(p.id) || ids.open.has(p.id) ? "focus" : "dim",
-      pose: getPlayerPose(p, situation, situation?.phase || "MIDFIELD"),
+      pose: authoredPositions?.[p.id]?.pose || getPlayerPose(p, situation, situation?.phase || phase),
+      enterFrom: p.id.startsWith("h_") ? { x: -6, y:p.y } : { x: 106, y:p.y },
     };
   });
+};
+
+const firstBy = (players, predicate) => players.find(predicate) || null;
+
+const firstHomeByRole = (players, roles, side = null) => {
+  const sideOk = (p) => {
+    if (side === "right") return p.y >= 52;
+    if (side === "left") return p.y <= 48;
+    return true;
+  };
+  for (const role of roles) {
+    const match = firstBy(players, p => p.t === "h" && p.role === role && sideOk(p)) ||
+      firstBy(players, p => p.id?.startsWith("h_") && p.role === role && sideOk(p));
+    if (match) return match;
+  }
+  for (const role of roles) {
+    const match = firstBy(players, p => p.t === "h" && p.role === role) ||
+      firstBy(players, p => p.id?.startsWith("h_") && p.role === role);
+    if (match) return match;
+  }
+  return null;
+};
+
+const firstAwayByRole = (players, roles, side = null) => {
+  const sideOk = (p) => {
+    if (side === "right") return p.y >= 52;
+    if (side === "left") return p.y <= 48;
+    return true;
+  };
+  for (const role of roles) {
+    const match = firstBy(players, p => p.t === "a" && p.role === role && sideOk(p)) ||
+      firstBy(players, p => p.id?.startsWith("a_") && p.role === role && sideOk(p));
+    if (match) return match;
+  }
+  for (const role of roles) {
+    const match = firstBy(players, p => p.t === "a" && p.role === role) ||
+      firstBy(players, p => p.id?.startsWith("a_") && p.role === role);
+    if (match) return match;
+  }
+  return null;
+};
+
+const getReadOptionIds = (players, situation, gs) => {
+  const ids = [];
+  const add = (playerOrId) => {
+    const id = typeof playerOrId === "string" ? playerOrId : playerOrId?.id;
+    if (id && !ids.includes(id)) ids.push(id);
+  };
+  const byId = (id) => findById(players, id);
+  const idsToPlayers = (list = []) => list.map(byId).filter(Boolean);
+  const side = situation.openSide === "left" || situation.openSide === "right" ? situation.openSide : null;
+
+  add(situation.ballCarrierId);
+
+  if (gs === "MIDFIELD") {
+    const offBallHome = players.filter(p => p.id !== situation.ballCarrierId);
+    add(firstHomeByRole(offBallHome, ["RW", "LW", "RB", "LB", "RM", "LM"], side));
+    add(firstHomeByRole(players, ["ST"]));
+    add(firstHomeByRole(offBallHome, ["AM", "CM", "DM"]));
+    for (const p of idsToPlayers(situation.pressurePlayerIds)) add(p);
+    return ids;
+  }
+
+  if (gs === "ATTACK") {
+    add(idsToPlayers(situation.openPlayerIds).find(p => p.id?.startsWith("h_")));
+    add(firstBy(players, p => p.id === "a_gk"));
+    add(idsToPlayers(situation.supportOptionIds).find(p => p.id?.startsWith("h_")));
+    add(firstAwayByRole(players, ["CB", "LB", "RB", "DM"]));
+    for (const p of idsToPlayers(situation.pressurePlayerIds)) add(p);
+    return ids;
+  }
+
+  if (gs === "DEFEND") {
+    add(firstBy(players, p => p.id === "h_gk"));
+    add(idsToPlayers(situation.pressurePlayerIds).find(p => p.id?.startsWith("h_")));
+    add(idsToPlayers(situation.supportOptionIds).find(p => p.id?.startsWith("h_")));
+    add(idsToPlayers(situation.openPlayerIds).find(p => p.id?.startsWith("a_")));
+    add(firstHomeByRole(players, ["CB", "DM", "RB", "LB"]));
+  }
+
+  return ids;
+};
+
+const limitVisiblePlayers = (players, situation, gs) => {
+  const readOptionIds = getReadOptionIds(players, situation, gs);
+  const explicit = situation.visiblePlayerIds?.length ? new Set(situation.visiblePlayerIds) : null;
+  if (explicit) {
+    const orderedExplicit = [...readOptionIds, ...(situation.visiblePlayerIds || [])];
+    const seenExplicit = new Set();
+    return orderedExplicit
+      .filter(id => {
+        if (!id || seenExplicit.has(id)) return false;
+        if (!explicit.has(id) && !readOptionIds.includes(id)) return false;
+        seenExplicit.add(id);
+        return true;
+      })
+      .map(id => findById(players, id))
+      .filter(Boolean)
+      .slice(0, 7);
+  }
+
+  const routeIds = [situation.routePreview?.from, situation.routePreview?.to].filter(Boolean);
+  const priorityGroups = [
+    [situation.ballCarrierId],
+    situation.pressurePlayerIds || [],
+    readOptionIds,
+    routeIds,
+    situation.openPlayerIds || [],
+    situation.supportOptionIds || [],
+    situation.activePlayerIds || [],
+    gs === "ATTACK" ? ["a_gk"] : gs === "DEFEND" ? ["h_gk"] : [],
+  ];
+
+  const orderedIds = [];
+  const seen = new Set();
+  for (const group of priorityGroups) {
+    for (const id of group) {
+      if (id && !seen.has(id)) {
+        seen.add(id);
+        orderedIds.push(id);
+      }
+    }
+  }
+
+  const byId = new Map(players.map(p => [p.id, p]));
+  const visible = orderedIds.map(id => byId.get(id)).filter(Boolean);
+  if (visible.length < 4) {
+    for (const p of players) {
+      if (visible.length >= 4) break;
+      if (!seen.has(p.id)) visible.push(p);
+    }
+  }
+  return visible.slice(0, 7);
 };
 
 const findById = (players, id) => players.find(p => p.id === id) || null;
@@ -281,15 +518,22 @@ const makeRoute = (players, routePreview) => {
 
 // ─── buildTurnContext ─────────────────────────────────────────────────────────
 // Now accepts formationId so intent list reflects tactical choice
-export const buildTurnContext = (gs = "MIDFIELD", si = 0, stats = {}, formationId = null) => {
+export const buildTurnContext = (gs = "MIDFIELD", si = 0, stats = {}, formationId = null, flow = {}) => {
   const pool      = TURN_SITUATIONS[gs] || TURN_SITUATIONS.MIDFIELD;
-  const situation = pool[si % pool.length] || pool[0];
+  const baseSituation = pool[si % pool.length] || pool[0];
+  const midfieldSide = gs === "MIDFIELD" ? (flow?.midfieldSide || "home") : null;
+  const situation = gs === "MIDFIELD" && midfieldSide === "away"
+    ? opponentMidfieldSituation(baseSituation)
+    : baseSituation;
   const layout    = PHASE_PLAYER_LAYOUTS[gs] || PHASE_PLAYER_LAYOUTS.MIDFIELD;
-  const players   = withSituationAdjustments([...(layout.home || []), ...(layout.away || [])], situation);
-  const carrier   = findById(players, situation.ballCarrierId) || players.find(p => p.hB) || players[0];
-  const route     = makeRoute(players, situation.routePreview);
+  const allPlayers = withSituationAdjustments([...(layout.home || []), ...(layout.away || [])], situation, gs, si);
+  const carrier   = findById(allPlayers, situation.ballCarrierId) || allPlayers.find(p => p.hB) || allPlayers[0];
+  const route     = makeRoute(allPlayers, situation.routePreview);
+  const players   = limitVisiblePlayers(allPlayers, situation, gs);
 
-  const canonical = CANONICAL_READS[gs] || CANONICAL_READS.MIDFIELD;
+  const canonical = gs === "MIDFIELD" && midfieldSide === "away"
+    ? MIDFIELD_DEFENCE_READS
+    : (CANONICAL_READS[gs] || CANONICAL_READS.MIDFIELD);
   const availableIntents = canonical.player;
   const opponentIntents = canonical.opponent;
   const canonicalSituation = {
@@ -300,9 +544,10 @@ export const buildTurnContext = (gs = "MIDFIELD", si = 0, stats = {}, formationI
   };
 
   return {
-    id: `${gs}-${si}-${situation.id}`,
+    id: `${gs}-${midfieldSide || "phase"}-${si}-${situation.id}`,
     gs,
     phase: gs,
+    midfieldSide,
     si,
     stats,
     formationId,
@@ -349,13 +594,22 @@ export const getIntentRoute = (gs = "MIDFIELD", context = {}, intentId = null) =
   const baseRoute = context.routes?.[0];
   const open      = firstHome(context.openPlayers);
   const support   = firstHome(context.supportOptions);
+  const pressure  = firstHome(context.pressurePlayers);
+  const side      = context.openSide === "left" || context.openSide === "right" ? context.openSide : null;
+  const offBallHomePlayers = players.filter(p => p.id !== carrier.id);
+  const wide      = firstHomeByRole(offBallHomePlayers, ["RW", "LW", "RB", "LB", "RM", "LM"], side);
+  const long      = firstHomeByRole(players, ["ST"]) || firstHomeByRole(players, ["LW", "RW"], side);
+  const central   = firstHomeByRole(offBallHomePlayers, ["AM", "CM", "DM"]);
 
   if (gs === "MIDFIELD") {
-    if (id === "go_wide")      return { kind:"pass",   color:"#38bdf8", dash:"1.4 1.15", from:carrier, to:open || support || baseRoute?.to };
-    if (id === "play_through") return { kind:"pass",   color:"#34d399", dash:"1.4 1.15", from:carrier, to:support || baseRoute?.to };
+    if (id === "go_wide")      return { kind:"pass",   color:"#38bdf8", dash:"1.4 1.15", from:carrier, to:wide || open || support || baseRoute?.to };
+    if (id === "play_through") return { kind:"pass",   color:"#34d399", dash:"1.4 1.15", from:carrier, to:central || support || baseRoute?.to };
     if (id === "drive_on")     return { kind:"carry",  color:"#f97316", dash:"none",     from:carrier, to:clampPt({ x: carrier.x + 15, y: carrier.y - 5 }) };
     if (id === "play_safe")    return { kind:"reset",  color:"#facc15", dash:"2 1.6",    from:carrier, to:support || clampPt({ x: carrier.x - 13, y: carrier.y + 8 }) };
-    if (id === "go_long")      return { kind:"direct", color:"#f59e0b", dash:"2.4 1.2",  from:carrier, to:clampPt({ x: carrier.x + 28, y: carrier.y - 10 }) };
+    if (id === "go_long")      return { kind:"direct", color:"#f59e0b", dash:"2.4 1.2",  from:carrier, to:long || clampPt({ x: carrier.x + 28, y: carrier.y - 10 }) };
+    if (id === "press_middle") return { kind:"press",  color:"#ef4444", dash:"none",     from:pressure || support || clampPt({ x: carrier.x + 8, y: carrier.y }), to:carrier };
+    if (id === "cover_wide")   return { kind:"cover",  color:"#f59e0b", dash:"2 1.2",    from:support || pressure || clampPt({ x: carrier.x + 10, y: carrier.y + 10 }), to:open || baseRoute?.to || carrier };
+    if (id === "drop_off")     return { kind:"hold",   color:"#94a3b8", dash:"3 2",      from:support || pressure || carrier, to:clampPt({ x: carrier.x - 14, y: carrier.y }) };
   }
 
   if (gs === "ATTACK") {
@@ -380,7 +634,7 @@ export const getIntentRoute = (gs = "MIDFIELD", context = {}, intentId = null) =
 };
 
 const opponentByIdOrIndex = (gs, intent) => {
-  const list = OPPONENT_INTENTS[gs] || OPPONENT_INTENTS.MIDFIELD;
+  const list = [...(OPPONENT_INTENTS[gs] || OPPONENT_INTENTS.MIDFIELD), ...(INTENTS[gs] || [])];
   if (typeof intent === "number") return list[intent] || list[0];
   return list.find(i => i.id === intent) || list[0];
 };
@@ -395,19 +649,62 @@ export const getReadMatchup = (context, playerIntentId, opponentIntentId) => {
 
 // ─── pickOpponentIntent ───────────────────────────────────────────────────────
 // Uses opponent personality weights when an opponentName is supplied.
-export const pickOpponentIntent = (context, _playerIntent, opponentName = null) => {
+const difficultyWeights = (context, playerIntentId, baseWeights = null, difficulty = "medium") => {
+  const options = context?.opponentIntents || [];
+  const rule = context?.situation?.readMatrix?.[playerIntentId] || null;
+  if (!rule || !options.length) return baseWeights;
+
+  const tiers = {
+    easy:   { good: 0.56, counter: 0.16 },
+    medium: { good: 0.40, counter: 0.30 },
+    hard:   { good: 0.25, counter: 0.47 },
+  };
+  const tier = tiers[difficulty] || tiers.medium;
+  const otherShare = Math.max(0, 1 - tier.good - tier.counter);
+  const others = options.filter(id => id !== rule.beats && id !== rule.losesTo);
+  const weights = {};
+
+  for (const id of options) {
+    if (id === rule.beats) weights[id] = tier.good;
+    else if (id === rule.losesTo) weights[id] = tier.counter;
+    else weights[id] = others.length ? otherShare / others.length : 0;
+  }
+
+  return weights;
+};
+
+export const pickOpponentIntent = (context, playerIntentId, opponentName = null, difficulty = "medium") => {
   const gs      = context?.gs || "MIDFIELD";
   const options = (context?.opponentIntents || []).map(id => opponentByIdOrIndex(gs, id));
   if (!options.length) return opponentByIdOrIndex(gs, 0);
 
+  let baseWeights = null;
   if (opponentName) {
     const profile = getOpponentProfile(opponentName);
-    const weights = profile?.weights?.[gs] || null;
-    return weightedPick(options, weights);
+    baseWeights = profile?.weights?.[gs] || null;
   }
+
+  const weights = difficultyWeights(context, playerIntentId, baseWeights, difficulty) || baseWeights;
+  if (weights) return weightedPick(options, weights);
 
   // No personality → flat random
   return options[Math.floor(rand01() * options.length)] || options[0];
+};
+
+const nextPhaseForIntent = (gs, ok, context) => {
+  if (gs === "MIDFIELD" && context?.midfieldSide === "away") {
+    return { nextGs: ok ? "MIDFIELD" : "DEFEND", nextMidfieldSide: ok ? "home" : null };
+  }
+  if (gs === "MIDFIELD") {
+    return { nextGs: ok ? "ATTACK" : "MIDFIELD", nextMidfieldSide: ok ? null : "away" };
+  }
+  if (gs === "ATTACK") {
+    return { nextGs: ok ? "GOAL" : "MIDFIELD", nextMidfieldSide: "away" };
+  }
+  if (gs === "DEFEND") {
+    return { nextGs: ok ? "MIDFIELD" : "CONCEDE", nextMidfieldSide: "home" };
+  }
+  return { nextGs: ok ? TRANS[gs].s : TRANS[gs].f, nextMidfieldSide: null };
 };
 
 // ─── resolveIntent ────────────────────────────────────────────────────────────
@@ -418,13 +715,13 @@ export const pickOpponentIntent = (context, _playerIntent, opponentName = null) 
 //
 // FIX 2: Cue-aware feedback via getCueFeedback.
 // FIX 9: Consequence chain info returned in nextGs.
-export const resolveIntent = ({ context, playerIntent, opponentIntent, stats = {}, opponentName = null }) => {
+export const resolveIntent = ({ context, playerIntent, opponentIntent, stats = {}, opponentName = null, difficulty = "medium" }) => {
   void stats;
   const gs      = context?.gs || "MIDFIELD";
   const pIntent = intentByIdOrIndex(gs, playerIntent);
   const oIntent = opponentIntent
     ? opponentByIdOrIndex(gs, opponentIntent)
-    : pickOpponentIntent(context, pIntent?.id, opponentName);
+    : pickOpponentIntent(context, pIntent?.id, opponentName, difficulty);
 
   const matchup = getReadMatchup(context, pIntent?.id, oIntent?.id);
 
@@ -441,7 +738,7 @@ export const resolveIntent = ({ context, playerIntent, opponentIntent, stats = {
     ok = true;
   }
 
-  const nextGs  = ok ? TRANS[gs].s : TRANS[gs].f;
+  const { nextGs, nextMidfieldSide } = nextPhaseForIntent(gs, ok, context);
   const route   = getIntentRoute(gs, context, pIntent?.id) || context?.routes?.[0] || null;
   const ballTo  = route?.to || context?.ball || { x: 50, y: 50 };
 
@@ -456,10 +753,12 @@ export const resolveIntent = ({ context, playerIntent, opponentIntent, stats = {
       : `Rivals chose ${oIntent.lbl} — your read won the turn.`;
 
   const outcomeLine = ok
-    ? gs === "MIDFIELD" ? "Ball progressed and you kept possession."
+    ? gs === "MIDFIELD" && context?.midfieldSide === "away" ? "Midfield pressure worked and you won it back."
+      : gs === "MIDFIELD" ? "Ball progressed and you kept possession."
       : gs === "ATTACK" ? "The chance stayed alive."
       : "Danger was handled."
-    : gs === "MIDFIELD" ? "The move broke down and they can attack."
+    : gs === "MIDFIELD" && context?.midfieldSide === "away" ? "They pushed through midfield and entered danger."
+      : gs === "MIDFIELD" ? "The move broke down and they can attack midfield."
       : gs === "ATTACK" ? "The chance disappeared."
       : "They found a way through.";
 
@@ -483,6 +782,7 @@ export const resolveIntent = ({ context, playerIntent, opponentIntent, stats = {
     why,
     explanation:   `${why} ${counterLine} ${outcomeLine}`,
     nextGs,
+    nextMidfieldSide,
     movement: {
       ballFrom: context?.ballCarrierId,
       ballTo:   route?.to?.id || null,
@@ -490,7 +790,7 @@ export const resolveIntent = ({ context, playerIntent, opponentIntent, stats = {
       target:   ballTo,
     },
     effects: ok
-      ? ["Possession kept", gs === "MIDFIELD" ? "Ball advanced" : "Pressure relieved"]
+      ? ["Possession kept", gs === "MIDFIELD" && context?.midfieldSide === "away" ? "Ball recovered" : gs === "MIDFIELD" ? "Ball advanced" : "Pressure relieved"]
       : ["Possession lost", "Momentum swings"],
   };
 };
@@ -553,8 +853,6 @@ export const turnToTime = (turn, ts) => {
   const source = ts?.length ? ts : fallback;
   return `${source[clamp(turn - 1, 0, source.length - 1)]}'`;
 };
-
-import { BASE, SCENES } from "./constants.js";
 
 export const mkFormation = (gs, si, stats = {}, formationId = null) =>
   buildTurnContext(gs, si, stats, formationId).players;
@@ -642,6 +940,7 @@ export const buildMatchRewards = (score, S) => {
 };
 
 export const checkRewardUnlock = (ns) => {
+  if (ns.total === 1 && !ns.firstPlayClaimed)              return "firstPlay";
   if (ns.wins === 1 && !ns.firstWinClaimed)                return "firstWin";
   if (ns.streak === 5 && !ns.streakRewardsClaimed?.["5"])  return "fiveStreak";
   return null;

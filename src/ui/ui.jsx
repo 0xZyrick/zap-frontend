@@ -65,6 +65,41 @@ const getReadCopy = (intent, fallback = {}) => {
   };
 };
 
+const getReadHoverSub = (context, intentId) => {
+  const losesTo = context?.situation?.readMatrix?.[intentId]?.losesTo;
+  if (!losesTo) return "";
+
+  const counter = getReadCopy(losesTo);
+  return `loses to ${String(counter.name || losesTo).toLowerCase()}`;
+};
+
+const CRESTS = {
+  derick: "/assets/crests/derick.png",
+  derickfc: "/assets/crests/derick.png",
+  elmaestro: "/assets/crests/el-maestro.png",
+  phantomxi: "/assets/crests/phantom-xi.png",
+  codmai: "/assets/crests/codmai.png",
+  skyfoot: "/assets/crests/sky-foot.png",
+  ghoststrike: "/assets/crests/ghost-strike.png",
+};
+
+const assetKey = (name = "") =>
+  String(name)
+    .toLowerCase()
+    .replace(/\bfc\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+
+const crestSrc = (name) => CRESTS[assetKey(name)] || null;
+
+const clubInitials = (name = "FC") =>
+  String(name)
+    .replace(/\s+F\.?C\.?$/i, "")
+    .split(/\s+/)
+    .map((word) => word[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase() || "FC";
+
 const GLYPH_KIND = {
   drive_on:"drive",
   go_wide:"wide",
@@ -973,41 +1008,50 @@ export function StatPanel({ gs, stats, momentum = "normal" }) {
 
 // ─── ResolutionScreen ─────────────────────────────────────────────────────────
 // Turn resolution - shows decision vs rivals comparison with outcomes.
-export function ResolutionScreen({ gs, playerAction, rivalAction, resultOk = null, isResolving = false, message, onContinue, turnResult, context }) {
+export function ResolutionScreen({
+  gs,
+  playerAction,
+  rivalAction,
+  resultOk = null,
+  isResolving = false,
+  message,
+  onContinue,
+  turnResult,
+  context,
+  homeClub = "ZAP FC",
+  awayClub = "RIVALS FC",
+  score = null,
+}) {
   if (playerAction == null) return null;
 
   const selectedIntentId = context?.availableIntents?.[playerAction] || null;
   const playerIntent = turnResult?.playerIntent || (INTENTS[gs] || []).find(i => i.id === selectedIntentId) || ACTIONS[gs]?.[playerAction] || null;
   const cpuIntent = turnResult?.cpuIntent || null;
-  const rawRivalActionLabel = turnResult?.cpuIntent?.lbl || (typeof rivalAction === "number"
+  const outcomeLabels = new Set(["GOAL", "CONCEDED", "MISS", "DEFENDED", "OPPONENT READ"]);
+  const safeCpuLabel = turnResult?.cpuLbl && !outcomeLabels.has(String(turnResult.cpuLbl).toUpperCase())
+    ? turnResult.cpuLbl
+    : null;
+  const rawRivalActionLabel = turnResult?.cpuIntent?.lbl || safeCpuLabel || (typeof rivalAction === "number"
     ? ACTIONS[gs]?.[rivalAction]?.lbl || "HOLD SHAPE"
     : rivalAction || ACTIONS[gs]?.[2]?.lbl || "HOLD SHAPE");
-  const rawRivalActionDesc = turnResult?.cpuIntent?.dsc || "waiting";
   const playerCopy = getReadCopy(playerIntent || selectedIntentId, {
     name: playerIntent?.lbl || "READ",
     sub: playerIntent?.dsc || ACTION_DECISIONS[gs]?.[playerAction] || "",
   });
-  const rivalCopy = isResolving
-    ? { name:"READ", sub:"waiting" }
-    : getReadCopy(cpuIntent, { name:rawRivalActionLabel, sub:rawRivalActionDesc });
+  const rivalCopy = cpuIntent
+    ? getReadCopy(cpuIntent, { name:rawRivalActionLabel, sub:"" })
+    : { name:String(rawRivalActionLabel || "HOLD SHAPE").toUpperCase(), sub:"" };
   const playerActionLabel = playerCopy.name;
-  const playerActionDesc = playerCopy.sub;
-  const rivalActionLabel = rivalCopy.name;
-  const rivalActionDesc = rivalCopy.sub;
+  const rivalActionLabel = isResolving
+    ? "WAITING"
+    : rivalCopy.name;
 
   const readRelation = playerIntent?.beats?.includes(cpuIntent?.id)
     ? "beats"
     : playerIntent?.losesTo?.includes(cpuIntent?.id)
       ? "loses"
       : "wins";
-  const verdictLabel = isResolving
-    ? "Resolving"
-    : resultOk
-      ? "Win"
-      : "Loss";
   const outcomeCol = isResolving ? "#facc15" : resultOk ? "#4ade80" : "#ef4444";
-  const outcomeGlow = isResolving ? "rgba(250,204,21,.14)" : resultOk ? "rgba(74,222,128,.15)" : "rgba(239,68,68,.15)";
-  // Use the precise cue-aware line from resolveIntent when available (Fix 2)
   const why = isResolving
     ? (message || "Waiting for the opponent read.")
     : turnResult?.why
@@ -1023,176 +1067,177 @@ export function ResolutionScreen({ gs, playerAction, rivalAction, resultOk = nul
           : resultOk
             ? `${playerActionLabel} won the turn.`
             : `${rivalActionLabel} won the turn.`;
-  const next = isResolving
-    ? "Next match state will appear here."
-    : turnResult?.goalScored
-      ? "Restart from midfield."
-      : turnResult?.conceded
-        ? "Restart from midfield."
-        : turnResult?.nextGs === "ATTACK"
-          ? "Attack the next chance."
-          : turnResult?.nextGs === "DEFEND"
-            ? "Defend the break."
-            : "Reset in midfield.";
-  const readCard = (label, title, desc, col) => (
+  const statusLabel = isResolving
+    ? "RESOLVING..."
+    : resultOk
+      ? "CORRECT READ"
+      : "WRONG READ";
+  const matchSide = ({ club, read, tone, align = "left" }) => (
     <div style={{
-      borderRadius:"12px",
-      border:`1px solid ${col}4f`,
-      background:`linear-gradient(135deg, rgba(4,10,7,.86), ${col}10)`,
-      padding:"13px 14px",
-      minHeight:"92px",
-      boxShadow:`0 12px 28px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.04)`,
+      minWidth:0,
+      textAlign:align,
     }}>
-      <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".22em", color:col, marginBottom:"8px", textTransform:"uppercase", fontWeight:700 }}>
-        {label}
-      </div>
-      <div style={{ fontFamily:"var(--f-disp)", fontSize:"18px", letterSpacing:"1.4px", color:"#fff", lineHeight:1, marginBottom:"6px", textTransform:"uppercase" }}>
-        {title}
-      </div>
-      <div style={{ fontFamily:"var(--f-body)", fontSize:"12px", color:"rgba(238,245,240,.66)", lineHeight:1.35 }}>
-        {desc}
+      <div style={{ minWidth:0 }}>
+        <div style={{ color:"rgba(255,255,255,.44)", fontFamily:"var(--f-mono)", fontSize:"6.5px", letterSpacing:".16em", textTransform:"uppercase", lineHeight:1 }}>
+          {align === "right" ? "THEM" : "YOU"}
+        </div>
+        <div style={{ marginTop:"3px", color:"rgba(255,255,255,.76)", fontFamily:"var(--f-body)", fontSize:"9px", fontWeight:700, lineHeight:1, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+          {club}
+        </div>
+        <strong style={{
+          display:"block",
+          marginTop:"5px",
+          color:isResolving && align === "right" ? "rgba(255,255,255,.48)" : tone,
+          fontFamily:"var(--f-cond)",
+          fontSize:"clamp(17px, 2.2vw, 24px)",
+          fontWeight:800,
+          letterSpacing:".04em",
+          lineHeight:.95,
+          textTransform:"uppercase",
+          whiteSpace:"nowrap",
+          overflow:"hidden",
+          textOverflow:"ellipsis",
+          textShadow:`0 0 16px ${tone}44`,
+        }}>{read}</strong>
       </div>
     </div>
   );
 
   return (
     <div style={{
-      position: "absolute",
-      left: "50%", bottom: "10px",
-      transform: "translateX(-50%)",
-      width: "min(860px, calc(100% - 24px))",
-      zIndex: 25,
-      borderRadius: "14px",
-      overflow: "hidden",
-      border: `1px solid ${outcomeCol}33`,
-      background: "linear-gradient(180deg, rgba(2,8,5,.98) 0%, rgba(0,3,2,.99) 100%)",
-      boxShadow: `0 28px 76px rgba(0,0,0,.74), 0 0 42px ${outcomeGlow}`,
-      animation: "phaseIn .4s ease",
+      position:"fixed",
+      inset:0,
+      zIndex:80,
+      display:"flex",
+      alignItems:"flex-end",
+      justifyContent:"center",
+      padding:"18px 18px clamp(42px, 9vh, 82px)",
+      boxSizing:"border-box",
+      pointerEvents:"none",
     }}>
-      {/* Top accent bar */}
-      <div style={{
-        height: "3px",
-        background: `linear-gradient(90deg, transparent, ${outcomeCol}, transparent)`,
-        boxShadow: `0 0 20px ${outcomeCol}66`,
-      }} />
-
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "minmax(0,1fr) minmax(180px,.72fr) minmax(0,1fr)",
-        gap: "12px",
-        padding: "16px",
-        alignItems:"stretch",
-      }}>
-        {readCard("YOUR READ", playerActionLabel, playerActionDesc, "#4ade80")}
-        <div style={{
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          justifyContent: "center",
-          gap:"8px",
-          borderRadius:"12px",
-          border:`1px solid ${outcomeCol}55`,
-          background:`linear-gradient(180deg, ${outcomeGlow}, rgba(255,255,255,.025))`,
-          padding:"14px 12px",
-          textAlign:"center",
-        }}>
-          <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".22em", color:"rgba(255,255,255,.42)", textTransform:"uppercase", fontWeight:700 }}>
-            VERDICT
-          </div>
-          <div style={{
-            fontFamily:"var(--f-disp)",
-            fontSize:"clamp(24px, 4vw, 38px)",
-            letterSpacing:"2px",
-            color:outcomeCol,
-            lineHeight:.95,
-            textTransform:"uppercase",
-            textShadow:`0 0 28px ${outcomeCol}55`,
-          }}>
-            {verdictLabel}
-          </div>
-          <div style={{ fontFamily:"var(--f-body)", fontSize:"11px", lineHeight:1.35, color:"rgba(238,245,240,.62)" }}>
-            {isResolving ? "Comparing the reads." : resultOk ? "The action won the turn." : "The action lost the turn."}
-          </div>
-        </div>
-        {readCard("THEIR READ", rivalActionLabel, rivalActionDesc, "#ef4444")}
-      </div>
-
+    <div style={{
+      width:"min(620px, calc(100% - 36px))",
+      borderRadius:"14px",
+      border:`1px solid ${outcomeCol}44`,
+      background:"linear-gradient(180deg, rgba(2,10,6,.94), rgba(0,3,2,.91))",
+      boxShadow:`0 18px 54px rgba(0,0,0,.48), 0 0 32px ${outcomeCol}22, inset 0 1px 0 rgba(255,255,255,.06)`,
+      backdropFilter:"blur(14px)",
+      overflow:"hidden",
+      pointerEvents:"auto",
+      animation:"phaseIn .22s ease both",
+    }}>
       <div style={{
         display:"grid",
-        gridTemplateColumns:"minmax(0,1.35fr) minmax(180px,.65fr)",
+        gridTemplateColumns:"minmax(0,1fr) 52px minmax(0,1fr)",
         gap:"10px",
-        padding: "0 16px 16px",
+        alignItems:"center",
+        padding:"10px 12px 8px",
       }}>
-        <div style={{
-          borderRadius:"12px",
-          border:"1px solid rgba(255,255,255,.08)",
-          background:"rgba(255,255,255,.03)",
-          padding:"12px 14px",
-        }}>
-          <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".22em", color:"rgba(255,255,255,.34)", marginBottom:"6px" }}>WHY</div>
-          <div style={{ fontFamily:"var(--f-body)", fontSize:"13px", color:"rgba(238,245,240,.78)", lineHeight:1.4 }}>{why}</div>
+        {matchSide({ club:homeClub, read:playerActionLabel, tone:!isResolving && !resultOk ? "#ef4444" : "#22d35f" })}
+        <div style={{ display:"grid", placeItems:"center", gap:"4px", minWidth:0 }}>
+          <div style={{
+            width:"38px",
+            height:"38px",
+            borderRadius:"50%",
+            border:`1px solid ${outcomeCol}55`,
+            background:`radial-gradient(circle, ${outcomeCol}22, rgba(0,0,0,.72) 70%)`,
+            color:outcomeCol,
+            display:"grid",
+            placeItems:"center",
+            fontFamily:"var(--f-disp)",
+            fontSize:"11px",
+            letterSpacing:".08em",
+            boxShadow:`0 0 18px ${outcomeCol}26`,
+          }}>VS</div>
+          <span style={{ color:"rgba(255,255,255,.38)", fontFamily:"var(--f-mono)", fontSize:"6px", letterSpacing:".14em" }}>
+            {ZONE[gs]?.lbl || gs}
+          </span>
         </div>
-        <div style={{
-          borderRadius:"12px",
-          border:"1px solid rgba(255,255,255,.08)",
-          background:"rgba(255,255,255,.03)",
-          padding:"12px 14px",
-        }}>
-          <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".22em", color:"rgba(255,255,255,.34)", marginBottom:"6px" }}>NEXT</div>
-          <div style={{ fontFamily:"var(--f-body)", fontSize:"13px", color:"rgba(238,245,240,.78)", lineHeight:1.4 }}>{next}</div>
-        </div>
+        {matchSide({ club:awayClub, read:rivalActionLabel, tone:!isResolving && resultOk ? "#ef4444" : "#22d35f", align:"right" })}
       </div>
 
       <div style={{
-        padding: "0 16px 16px",
-        borderTop: "1px solid rgba(255,255,255,.1)",
-        background: "rgba(255,255,255,.015)",
+        minHeight:"30px",
+        padding:"0 12px 9px",
+        display:"grid",
+        gridTemplateColumns:!isResolving ? "minmax(0,1fr) auto" : "1fr",
+        gap:"10px",
+        alignItems:"center",
       }}>
-        <button
-          onClick={isResolving ? undefined : onContinue}
-          disabled={isResolving}
-          style={{
-            width: "100%",
-            padding: "14px 16px",
-            borderRadius: "11px",
-            background: isResolving
-              ? "linear-gradient(135deg, rgba(148,163,184,.5) 0%, rgba(71,85,105,.5) 100%)"
-              : resultOk === false
-                ? "linear-gradient(135deg, #ef4444 0%, #b91c1c 100%)"
-                : "linear-gradient(135deg, #4ade80 0%, #22c55e 100%)",
-            color: "#020504",
-            fontFamily: "var(--f-disp)",
-            fontSize: "16px",
-            fontWeight: 800,
-            letterSpacing: "1.6px",
-            border: "none",
-            cursor: isResolving ? "wait" : "pointer",
-            opacity: isResolving ? .72 : 1,
-            boxShadow: isResolving
-              ? "inset 0 1px 0 rgba(255,255,255,.1)"
-              : resultOk === false
-                ? "0 14px 32px rgba(239,68,68,.3), inset 0 1px 0 rgba(255,255,255,.16)"
-                : "0 14px 32px rgba(74,222,128,.32), inset 0 1px 0 rgba(255,255,255,.18)",
-            transition: "all .2s cubic-bezier(.34,.69,.64,1)",
-          }}
-          onMouseEnter={(e) => {
-            if (isResolving) return;
-            e.currentTarget.style.transform = "translateY(-2px)";
-            e.currentTarget.style.boxShadow = resultOk === false
-              ? "0 18px 44px rgba(239,68,68,.38), inset 0 1px 0 rgba(255,255,255,.2)"
-              : "0 18px 44px rgba(74,222,128,.42), inset 0 1px 0 rgba(255,255,255,.22)";
-          }}
-          onMouseLeave={(e) => {
-            if (isResolving) return;
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.boxShadow = resultOk === false
-              ? "0 14px 32px rgba(239,68,68,.3), inset 0 1px 0 rgba(255,255,255,.16)"
-              : "0 14px 32px rgba(74,222,128,.32), inset 0 1px 0 rgba(255,255,255,.18)";
-          }}
-        >
-          {isResolving ? "RESOLVING..." : "CONTINUE"}
-        </button>
+        <div style={{
+          minWidth:0,
+          borderRadius:"8px",
+          border:`1px solid ${outcomeCol}35`,
+          background:`linear-gradient(90deg, ${outcomeCol}16, rgba(255,255,255,.035), ${outcomeCol}10)`,
+          color:outcomeCol,
+          fontFamily:"var(--f-cond)",
+          fontSize:"clamp(14px,1.45vw,18px)",
+          fontWeight:800,
+          letterSpacing:".08em",
+          textTransform:"uppercase",
+          textAlign:"center",
+          padding:"7px 10px 6px",
+          whiteSpace:"nowrap",
+          overflow:"hidden",
+          textOverflow:"ellipsis",
+        }}>
+          {isResolving ? (
+            <span style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", gap:"6px" }}>
+              THINKING
+              <span style={{ display:"inline-flex", gap:"3px", transform:"translateY(-1px)" }}>
+                {[0, 1, 2].map((dot) => (
+                  <i key={dot} style={{
+                    width:"4px",
+                    height:"4px",
+                    borderRadius:"50%",
+                    background:outcomeCol,
+                    animation:`thinkingDot 1.05s ${dot * 0.16}s ease-in-out infinite`,
+                  }} />
+                ))}
+              </span>
+            </span>
+          ) : statusLabel}
+        </div>
+        {!isResolving && (
+          <button onClick={onContinue} style={{
+            minWidth:"112px",
+            height:"32px",
+            borderRadius:"8px",
+            background:outcomeCol,
+            color:"#020504",
+            fontFamily:"var(--f-body)",
+            fontSize:"11px",
+            fontWeight:900,
+            letterSpacing:".08em",
+            textTransform:"uppercase",
+          }}>
+            Continue
+          </button>
+        )}
       </div>
+
+      {isResolving && (
+        <div style={{ display:"flex", justifyContent:"center", gap:"7px", padding:"0 12px 11px" }}>
+          {[0, 1, 2, 3, 4].map((dot) => (
+            <span key={dot} style={{
+              width:"5px",
+              height:"5px",
+              borderRadius:"50%",
+              background:outcomeCol,
+              opacity:.38,
+              boxShadow:`0 0 12px ${outcomeCol}77`,
+              animation:`thinkingDot 1.2s ${dot * 0.12}s ease-in-out infinite`,
+            }} />
+          ))}
+        </div>
+      )}
+
+      {!isResolving && (
+        <div style={{ padding:"8px 12px 10px", color:"rgba(238,245,240,.66)", fontFamily:"var(--f-body)", fontSize:"11px", lineHeight:1.25, textAlign:"center" }}>
+          {why}
+        </div>
+      )}
+    </div>
     </div>
   );
 }
@@ -1366,6 +1411,9 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
       "go_long": { title: "Go direct", text: "Hit it long.", context: "Use it when the runner is in behind.", col: "#f59e0b" },
       "slip_pass": { title: "Slide them in", text: "Release the run.", context: "Use it when the runner breaks.", col: "#34d399" },
       "hold_wait": { title: "Hold it up", text: "Wait for help.", context: "Use it when support is close.", col: "#a78bfa" },
+      "press_middle": { title: "Press middle", text: "Close the centre.", context: "Use it before they drive through.", col: "#ef4444" },
+      "cover_wide": { title: "Cover wide", text: "Protect the flank.", context: "Use it when the wide runner is free.", col: "#f59e0b" },
+      "drop_off": { title: "Drop off", text: "Give no space.", context: "Use it when the direct ball is coming.", col: "#94a3b8" },
     },
     ATTACK: {
       "finish": { title: "Shoot", text: "Hit it now.", context: "Use it before the defender steps.", col: "#fb7185" },
@@ -1396,7 +1444,7 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
       position: "absolute",
       left: "50%", bottom: "10px",
       transform: "translateX(-50%)",
-      width: "min(920px, calc(100% - 24px))",
+      width: "min(760px, calc(100% - 24px))",
       zIndex: 25,
       borderRadius: "14px",
       overflow: "visible",
@@ -1405,7 +1453,7 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
       boxShadow: "none",
     }}>
       {/* Horizontal card layout */}
-      <div style={{ display:"flex", gap:"10px", padding:"10px", justifyContent:"center", flexWrap:"wrap" }}>
+      <div style={{ display:"flex", gap:"8px", padding:"7px", justifyContent:"center", flexWrap:"wrap" }}>
         {[0, 1, 2].map((slotIndex) => {
           const index = slotIndex;
           const a = actions[slotIndex];
@@ -1413,17 +1461,17 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
           // Locked slot: formation restricts this intent
           if (!a) return (
             <div key={`locked-${slotIndex}`} style={{
-              minHeight:"80px",
+              minHeight:"58px",
               display:"flex", flexDirection:"row",
               alignItems:"center", justifyContent:"center", gap:"8px",
-              padding:"12px 22px",
+              padding:"8px 14px",
               borderRadius:"8px",
               border:"1px solid rgba(255,255,255,.08)",
               background:"linear-gradient(135deg,rgba(8,14,10,.34),rgba(0,0,0,.38))",
               opacity:0.4,
               flex:"1 1 0",
-              minWidth:"188px",
-              maxWidth:"318px",
+              minWidth:"150px",
+              maxWidth:"246px",
             }}>
               <div style={{
                 width:"32px", height:"32px", borderRadius:"7px",
@@ -1438,6 +1486,7 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
           // Normal card
           const read = phaseReads[a.id] || { title: a.lbl || "OPTION", text: a.dsc || "Make your choice", context: "", col: "#60a5fa" };
           const actionCopy = getReadCopy(a, { name:read.title, sub:read.text });
+          const hoverSub = getReadHoverSub(context, a.id);
           const accent = read.col || a.rc || "#60a5fa";
 
           return (
@@ -1458,19 +1507,19 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
                 WebkitTapHighlightColor:"transparent",
                 animation: active ? `btnStagger .28s cubic-bezier(.25,.46,.45,.94) ${index * 60}ms both` : "none",
                 flex:"1 1 0",
-                minWidth:"188px",
-                maxWidth:"318px",
+                minWidth:"150px",
+                maxWidth:"246px",
               }}
             >
               <div
                 className="read-action-card"
                 style={{
-                  minHeight: "80px",
+                  minHeight: "58px",
                   display: "grid",
-                  gridTemplateColumns: "58px minmax(0,1fr)",
+                  gridTemplateColumns: "44px minmax(0,1fr)",
                   alignItems: "center",
-                  gap: "14px",
-                  padding: "11px 18px 11px 13px",
+                  gap: "10px",
+                  padding: "8px 13px 8px 10px",
                   borderRadius: "8px",
                   border: active ? `1px solid ${accent}d0` : "1px solid rgba(255,255,255,.07)",
                   background: active
@@ -1478,7 +1527,7 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
                     : "rgba(6,10,8,.55)",
                   opacity: active ? 1 : 0.28,
                   boxShadow: active
-                    ? `0 12px 30px rgba(0,0,0,.46), 0 0 0 1px ${accent}22, 0 0 20px ${accent}24, inset 0 1px 0 rgba(255,255,255,.08)`
+                    ? `0 8px 20px rgba(0,0,0,.42), 0 0 0 1px ${accent}1f, 0 0 14px ${accent}20, inset 0 1px 0 rgba(255,255,255,.08)`
                     : "none",
                   transition: "transform .18s cubic-bezier(.34,.69,.64,1), border-color .18s ease, box-shadow .18s ease, background .18s ease",
                   position: "relative",
@@ -1500,23 +1549,24 @@ export function ActionCards({ gs, phase, onAction, context, onPreviewIntent, dis
                 {/* Title and description */}
                 <div style={{ minWidth:0, display:"flex", flexDirection:"column", gap:"4px", position:"relative" }}>
                   <div style={{
-                    fontFamily:"var(--f-disp)", fontSize:"20px", color:"#fff",
-                    letterSpacing:"2px", lineHeight:.9, textTransform:"uppercase",
+                    fontFamily:"var(--f-disp)", fontSize:"16px", color:"#fff",
+                    letterSpacing:"1.4px", lineHeight:.9, textTransform:"uppercase",
                     fontWeight: 800,
                     textShadow:`0 0 16px ${accent}44`,
                   }}>
                     {actionCopy.name}
                   </div>
-                  {actionCopy.sub && (
-                    <div style={{
+                  {(actionCopy.sub || hoverSub) && (
+                    <div className="read-action-card__sub" style={{
                       fontFamily:"var(--f-mono)", fontSize:"8.5px",
-                      color:"rgba(238,245,240,.60)", lineHeight:1.15,
+                      color:"rgba(238,245,240,.78)", lineHeight:1.15,
                       letterSpacing: ".05em",
                       whiteSpace:"nowrap",
                       overflow:"hidden",
                       textOverflow:"ellipsis",
                     }}>
-                      {actionCopy.sub}
+                      <span className="read-action-card__sub-default">{actionCopy.sub}</span>
+                      {hoverSub && <span className="read-action-card__sub-hover">{hoverSub}</span>}
                     </div>
                   )}
                 </div>

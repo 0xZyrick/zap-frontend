@@ -121,6 +121,73 @@ export async function getPlayerRegistry(walletAddress) {
   }
 }
 
+export async function getGlobalLeaderboard(limit = 50) {
+  if (!TORII_URL) return [];
+
+  try {
+    const response = await fetch(toriiGraphqlUrl(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `
+          query GlobalLeaderboard($first: Int!) {
+            dojoStarterPlayerRegistryModels(first: $first) {
+              edges {
+                node {
+                  wallet
+                  registered
+                  club_name
+                  rep
+                  wins
+                  losses
+                  draws
+                  streak
+                  coins
+                  total_matches
+                }
+              }
+              totalCount
+            }
+          }
+        `,
+        variables: { first: Math.max(1, Math.min(Number(limit) || 50, 100)) },
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Torii leaderboard query failed: ${response.status}`);
+
+    const payload = await response.json();
+    if (payload?.errors?.length) {
+      throw new Error(payload.errors.map((err) => err.message).join("; "));
+    }
+
+    return (payload?.data?.dojoStarterPlayerRegistryModels?.edges || [])
+      .filter((edge) => !!edge?.node?.registered)
+      .map((edge, index) => {
+        const node = edge?.node || {};
+        return {
+          id: node.wallet || `global-${index}`,
+          wallet: node.wallet,
+          name: decodeFeltString(node.club_name) || "UNKNOWN FC",
+          pts: Number(node.rep || 0),
+          rep: Number(node.rep || 0),
+          wins: Number(node.wins || 0),
+          draws: Number(node.draws || 0),
+          losses: Number(node.losses || 0),
+          streak: Number(node.streak || 0),
+          coins: Number(node.coins || 0),
+          total: Number(node.total_matches || 0),
+          cpu: false,
+          source: "torii",
+        };
+      })
+      .sort((a, b) => b.rep - a.rep || b.wins - a.wins || a.losses - b.losses)
+      .map((entry, index) => ({ ...entry, rank: index + 1 }));
+  } catch {
+    return [];
+  }
+}
+
 const isFreshActiveSession = (session) => {
   if (!session) return false;
   const state = unpackState(session.state);

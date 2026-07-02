@@ -89,6 +89,9 @@ export const INTENTS = {
     { id:"go_long",      idx:2, lbl:"Go long",           dsc:"Go direct",          feel:"Direct",         rc:"#f59e0b", icon:"↟", line:"mid", targetCue:"long_lane"   },
     { id:"play_safe",    idx:2, lbl:"Keep it",           dsc:"Don't risk it",      feel:"Controlled",     rc:"#facc15", icon:"▣", line:"mid", targetCue:"support_near"},
     { id:"play_through", idx:0, lbl:"Find the runner",   dsc:"Split them open",    feel:"Quick release",  rc:"#34d399", icon:"↗", line:"mid", targetCue:"inside_lane" },
+    { id:"press_middle", idx:0, lbl:"Press middle",      dsc:"Close the centre",   feel:"Front foot",     rc:"#ef4444", icon:"!", line:"mid", targetCue:"pressure_on" },
+    { id:"cover_wide",   idx:1, lbl:"Cover wide",        dsc:"Protect the flank",  feel:"Disciplined",    rc:"#f59e0b", icon:"→", line:"mid", targetCue:"right_open" },
+    { id:"drop_off",     idx:2, lbl:"Drop off",          dsc:"Give no space",      feel:"Patient",        rc:"#94a3b8", icon:"▣", line:"mid", targetCue:"long_lane" },
   ],
   ATTACK: [
     { id:"slip_pass",   idx:0, lbl:"Slide them in",    dsc:"Release the run",       feel:"Quick release",  rc:"#34d399", icon:"↗", targetCue:"runner_free" },
@@ -357,7 +360,7 @@ export const CUE_FEEDBACK = {
 };
 
 // ─── TURN SITUATIONS ──────────────────────────────────────────────────────────
-// Expanded: 10 MIDFIELD, 9 ATTACK, 8 DEFEND situations
+// Expanded: 13 MIDFIELD, 12 ATTACK, 10 DEFEND situations
 export const TURN_SITUATIONS = {
   MIDFIELD: [
     {
@@ -550,6 +553,96 @@ export const TURN_SITUATIONS = {
       },
     },
     {
+      id:"high_press_trap", title:"High Press Trap",
+      summary:"Pinned deep by two closing shirts. The escape is risky and direct.",
+      ballZone:"left_midfield", ballCarrierId:"h_lb", pressure:"high", openSide:"ahead", insideCrowded:false,
+      cues:[
+        { id:"pressure_on", label:"Two Closing", sub:"Trap is sprung", tone:"danger" },
+        { id:"long_lane", label:"Clear Grass", sub:"Space beyond press", tone:"good" },
+        { id:"inside_lane", label:"Risky Split", sub:"Thread it early", tone:"warn" },
+        { id:"support_near", label:"Clearance Safe", sub:"Get out clean", tone:"good" },
+      ],
+      activePlayerIds:["h_lb","h_dm","h_st","a_rm","a_st1","a_cm"],
+      visiblePlayerIds:["h_lb","a_rm","a_st1","h_st","h_dm","a_cm"],
+      supportOptionIds:["h_dm"], pressurePlayerIds:["a_rm","a_st1"], openPlayerIds:["h_st"],
+      crowdedZone:{ x:22, y:58, w:18, h:26, label:"press trap" },
+      routePreview:{ from:"h_lb", to:"h_st", kind:"direct", label:"escape ball" },
+      availableIntents:["go_long","play_through","play_safe"], opponentBias:["press_middle","cover_wide","drop_off"],
+      readMatrix:{
+        go_long:{ beats:"cover_wide", losesTo:"drop_off" },
+        play_through:{ beats:"drop_off", losesTo:"press_middle" },
+        play_safe:{ beats:"press_middle", losesTo:"cover_wide" },
+      },
+      positions:{
+        h_lb:{ x:24, y:72, pose:"run", angle:-6, runDir:1 },
+        a_rm:{ x:30, y:66, pose:"defend", angle:-10 },
+        a_st1:{ x:28, y:80, pose:"defend", angle:-8 },
+        h_st:{ x:66, y:48, pose:"run", runDir:1 },
+        h_dm:{ x:39, y:58, pose:"idle" },
+        a_cm:{ x:50, y:60, pose:"defend" },
+      },
+    },
+    {
+      id:"switch_of_play", title:"Switch of Play",
+      summary:"Left side is loaded. The far flank is empty if you see it early.",
+      ballZone:"left_midfield", ballCarrierId:"h_lw", pressure:"medium", openSide:"right", insideCrowded:true,
+      cues:[
+        { id:"right_open", label:"Far Side Empty", sub:"Huge diagonal space", tone:"good" },
+        { id:"long_lane", label:"Switch Is On", sub:"One ball changes it", tone:"good" },
+        { id:"pressure_on", label:"Closed Side", sub:"Press arriving", tone:"warn" },
+        { id:"inside_tight", label:"Middle Blocked", sub:"Do not force it", tone:"warn" },
+      ],
+      activePlayerIds:["h_lw","h_cm","h_rw","a_rm","a_cm","a_rb"],
+      visiblePlayerIds:["h_lw","a_rm","h_cm","a_cm","a_rb","h_rw"],
+      supportOptionIds:["h_cm"], pressurePlayerIds:["a_rm","a_cm"], openPlayerIds:["h_rw"],
+      crowdedZone:{ x:34, y:22, w:23, h:26, label:"loaded side" },
+      routePreview:{ from:"h_lw", to:"h_rw", kind:"direct", label:"diagonal switch" },
+      availableIntents:["go_long","go_wide","play_safe"], opponentBias:["cover_wide","press_middle","drop_off"],
+      readMatrix:{
+        go_long:{ beats:"drop_off", losesTo:"cover_wide" },
+        go_wide:{ beats:"press_middle", losesTo:"cover_wide" },
+        play_safe:{ beats:"cover_wide", losesTo:"drop_off" },
+      },
+      positions:{
+        h_lw:{ x:32, y:28, pose:"run", angle:5, runDir:1 },
+        a_rm:{ x:39, y:25, pose:"defend", angle:8 },
+        h_cm:{ x:43, y:43, pose:"idle" },
+        a_cm:{ x:49, y:36, pose:"defend" },
+        a_rb:{ x:63, y:66, pose:"defend", angle:-8 },
+        h_rw:{ x:82, y:78, pose:"run", runDir:1 },
+      },
+    },
+    {
+      id:"dm_screen", title:"Midfield Screen",
+      summary:"Their striker drops in. Follow him and the gap opens behind you.",
+      ballZone:"central_midfield", ballCarrierId:"h_dm", pressure:"medium", openSide:"right", insideCrowded:true,
+      cues:[
+        { id:"pressure_on", label:"Striker Drops", sub:"Very close now", tone:"danger" },
+        { id:"space_behind", label:"Gap Behind", sub:"Do not get dragged", tone:"warn" },
+        { id:"right_open", label:"Outlet Free", sub:"Escape wide", tone:"good" },
+        { id:"support_near", label:"Shape Behind", sub:"Hold the screen", tone:"good" },
+      ],
+      activePlayerIds:["h_dm","h_cb1","h_rw","a_st1","a_cm","a_dm"],
+      visiblePlayerIds:["h_dm","a_st1","h_cb1","a_cm","a_dm","h_rw"],
+      supportOptionIds:["h_cb1"], pressurePlayerIds:["a_st1","a_cm"], openPlayerIds:["h_rw"],
+      crowdedZone:{ x:40, y:43, w:18, h:22, label:"screen decision" },
+      routePreview:{ from:"h_dm", to:"h_rw", kind:"safe", label:"hold or release" },
+      availableIntents:["drive_on","go_wide","play_safe"], opponentBias:["press_middle","drop_off","cover_wide"],
+      readMatrix:{
+        drive_on:{ beats:"drop_off", losesTo:"press_middle" },
+        go_wide:{ beats:"press_middle", losesTo:"cover_wide" },
+        play_safe:{ beats:"cover_wide", losesTo:"drop_off" },
+      },
+      positions:{
+        h_dm:{ x:41, y:50, pose:"idle" },
+        a_st1:{ x:45, y:49, pose:"run", angle:9, runDir:-1 },
+        h_cb1:{ x:28, y:46, pose:"defend" },
+        a_cm:{ x:51, y:44, pose:"defend" },
+        a_dm:{ x:58, y:55, pose:"defend" },
+        h_rw:{ x:72, y:74, pose:"run", runDir:1 },
+      },
+    },
+    {
       id:"second_ball_fight", title:"Second Ball",
       summary:"Loose ball in midfield. First to it controls the game.",
       ballZone:"central_midfield", ballCarrierId:"h_cm", pressure:"medium", openSide:"left", insideCrowded:false,
@@ -733,6 +826,99 @@ export const TURN_SITUATIONS = {
       },
     },
     {
+      id:"penalty_box_scramble", title:"Penalty Box Scramble",
+      summary:"The keeper spills it in traffic. First clean reaction wins.",
+      ballZone:"central_attack", ballCarrierId:"h_st", pressure:"high", openSide:"goal", insideCrowded:true,
+      cues:[
+        { id:"box_crowded", label:"Bodies Everywhere", sub:"Ball loose", tone:"warn" },
+        { id:"shot_closing", label:"Finish Fast", sub:"Block coming", tone:"danger" },
+        { id:"runner_free", label:"Clean Touch", sub:"One teammate can poke it", tone:"good" },
+        { id:"keeper_rushing", label:"Keeper Down", sub:"Goal exposed", tone:"good" },
+      ],
+      activePlayerIds:["h_st","h_am","h_rw","a_gk","a_cb1","a_cb2","a_dm"],
+      visiblePlayerIds:["h_st","a_gk","a_cb1","h_am","a_cb2","h_rw","a_dm"],
+      supportOptionIds:["h_am","h_rw"], pressurePlayerIds:["a_cb1","a_cb2"], openPlayerIds:["h_am"],
+      crowdedZone:{ x:80, y:38, w:16, h:28, label:"loose ball" },
+      routePreview:{ from:"h_st", to:"h_am", kind:"direct", label:"reaction touch" },
+      availableIntents:["finish","slip_pass","hold_wait"], opponentBias:["block_shot","step_up","hold_shape"],
+      readMatrix:{
+        finish:{ beats:"hold_shape", losesTo:"block_shot" },
+        slip_pass:{ beats:"block_shot", losesTo:"step_up" },
+        hold_wait:{ beats:"step_up", losesTo:"hold_shape" },
+      },
+      positions:{
+        h_st:{ x:82, y:50, pose:"run", runDir:1 },
+        a_gk:{ x:91, y:49, pose:"defend" },
+        a_cb1:{ x:85, y:44, pose:"defend" },
+        h_am:{ x:76, y:37, pose:"run", runDir:1 },
+        a_cb2:{ x:86, y:57, pose:"defend" },
+        h_rw:{ x:78, y:65, pose:"run", runDir:1 },
+        a_dm:{ x:73, y:52, pose:"defend" },
+      },
+    },
+    {
+      id:"overlapping_run", title:"Overlapping Run",
+      summary:"The full-back has gone. Play early or wait for the lane to mature.",
+      ballZone:"right_attack", ballCarrierId:"h_rw", pressure:"medium", openSide:"right", insideCrowded:false,
+      cues:[
+        { id:"runner_free", label:"Overlap Starting", sub:"Play it early", tone:"good" },
+        { id:"right_open", label:"Flank Clear", sub:"Space outside", tone:"good" },
+        { id:"shot_closing", label:"Trackers Coming", sub:"Window shrinking", tone:"warn" },
+        { id:"box_crowded", label:"Box Set", sub:"Wait too long and it dies", tone:"warn" },
+      ],
+      activePlayerIds:["h_rw","h_rb","h_st","h_am","a_lb","a_cb1","a_cb2"],
+      visiblePlayerIds:["h_rw","a_lb","h_rb","h_st","a_cb1","h_am","a_cb2"],
+      supportOptionIds:["h_rb","h_am"], pressurePlayerIds:["a_lb","a_cb1"], openPlayerIds:["h_rb"],
+      crowdedZone:{ x:80, y:38, w:16, h:30, label:"2v2 forming" },
+      routePreview:{ from:"h_rw", to:"h_rb", kind:"pass", label:"overlap" },
+      availableIntents:["slip_pass","finish","hold_wait"], opponentBias:["step_up","hold_shape","block_shot"],
+      readMatrix:{
+        slip_pass:{ beats:"hold_shape", losesTo:"step_up" },
+        finish:{ beats:"step_up", losesTo:"block_shot" },
+        hold_wait:{ beats:"block_shot", losesTo:"hold_shape" },
+      },
+      positions:{
+        h_rw:{ x:72, y:70, pose:"run", angle:-5, runDir:1 },
+        a_lb:{ x:77, y:66, pose:"defend", angle:-8 },
+        h_rb:{ x:88, y:82, pose:"run", runDir:1 },
+        h_st:{ x:86, y:49, pose:"run", runDir:1 },
+        a_cb1:{ x:84, y:43, pose:"defend" },
+        h_am:{ x:76, y:52, pose:"idle" },
+        a_cb2:{ x:88, y:58, pose:"defend" },
+      },
+    },
+    {
+      id:"defensive_header_clearance", title:"Header Clearance",
+      summary:"A set-piece hangs in the box. Attack the flight or hold position.",
+      ballZone:"right_attack", ballCarrierId:"h_rw", pressure:"medium", openSide:"box", insideCrowded:true,
+      cues:[
+        { id:"aerial_threat", label:"Ball Dropping", sub:"Read the flight", tone:"danger" },
+        { id:"near_run", label:"Attack It", sub:"First jump can win", tone:"good" },
+        { id:"back_run", label:"Hold Shape", sub:"Far post still open", tone:"warn" },
+        { id:"box_crowded", label:"Bodies Tight", sub:"Contact coming", tone:"warn" },
+      ],
+      activePlayerIds:["h_rw","h_st","h_am","a_cb1","a_cb2","a_gk","a_dm"],
+      visiblePlayerIds:["h_rw","h_st","a_cb1","a_cb2","h_am","a_gk","a_dm"],
+      supportOptionIds:["h_st","h_am"], pressurePlayerIds:["a_cb1","a_cb2"], openPlayerIds:["h_st"],
+      crowdedZone:{ x:82, y:36, w:15, h:36, label:"header zone" },
+      routePreview:{ from:"h_rw", to:"h_st", kind:"direct", label:"set-piece flight" },
+      availableIntents:["near_post","back_post","cut_back"], opponentBias:["mark_zone","guard_near","hold_line"],
+      readMatrix:{
+        near_post:{ beats:"mark_zone", losesTo:"guard_near" },
+        back_post:{ beats:"guard_near", losesTo:"hold_line" },
+        cut_back:{ beats:"hold_line", losesTo:"mark_zone" },
+      },
+      positions:{
+        h_rw:{ x:76, y:82, pose:"run", runDir:1 },
+        h_st:{ x:87, y:43, pose:"run", runDir:1 },
+        a_cb1:{ x:84, y:41, pose:"defend" },
+        a_cb2:{ x:86, y:56, pose:"defend" },
+        h_am:{ x:77, y:63, pose:"idle" },
+        a_gk:{ x:94, y:50, pose:"defend" },
+        a_dm:{ x:78, y:50, pose:"defend" },
+      },
+    },
+    {
       id:"power_run_box", title:"Box Arrival",
       summary:"Winger isolated the full-back. Cross or cut inside.",
       ballZone:"right_attack", ballCarrierId:"h_rw", pressure:"low", openSide:"center", insideCrowded:false,
@@ -812,6 +998,62 @@ export const TURN_SITUATIONS = {
         hold_line:{ beats:"drive_on", losesTo:"shoot_early" },
         step_in:{ beats:"slip_runner", losesTo:"drive_on" },
         press_ball:{ beats:"shoot_early", losesTo:"slip_runner" },
+      },
+    },
+    {
+      id:"penalty_situation", title:"Penalty Situation",
+      summary:"One strike from the spot. The keeper has to read the body shape.",
+      ballZone:"central_defense", ballCarrierId:"a_st", pressure:"high", openSide:"goal", insideCrowded:false,
+      cues:[
+        { id:"pressure_chance", label:"Read the Hips", sub:"Keeper must choose", tone:"good" },
+        { id:"danger_run", label:"Pure Prediction", sub:"No second chance", tone:"danger" },
+        { id:"space_behind", label:"Corners Open", sub:"Commit late", tone:"warn" },
+      ],
+      activePlayerIds:["a_st","h_gk","h_cb1","h_cb2","a_cm"],
+      visiblePlayerIds:["a_st","h_gk","h_cb1","h_cb2","a_cm"],
+      supportOptionIds:["h_gk"], pressurePlayerIds:["h_gk"], openPlayerIds:["a_st"],
+      crowdedZone:null,
+      routePreview:{ from:"a_st", to:null, kind:"danger", label:"spot kick" },
+      availableIntents:["hold_line","step_in","press_ball"], opponentBias:["shoot_early","drive_on","slip_runner"],
+      readMatrix:{
+        hold_line:{ beats:"drive_on", losesTo:"shoot_early" },
+        step_in:{ beats:"slip_runner", losesTo:"drive_on" },
+        press_ball:{ beats:"shoot_early", losesTo:"slip_runner" },
+      },
+      positions:{
+        a_st:{ x:33, y:50, pose:"run", runDir:-1 },
+        h_gk:{ x:8, y:50, pose:"defend" },
+        h_cb1:{ x:18, y:38, pose:"defend" },
+        h_cb2:{ x:18, y:62, pose:"defend" },
+        a_cm:{ x:48, y:64, pose:"idle" },
+      },
+    },
+    {
+      id:"last_ditch_tackle", title:"Last Ditch Tackle",
+      summary:"An attacker is breaking clear. One defender has one clean chance.",
+      ballZone:"central_defense", ballCarrierId:"a_st", pressure:"high", openSide:"goal", insideCrowded:false,
+      cues:[
+        { id:"danger_run", label:"Breaking Clear", sub:"Last man sprint", tone:"danger" },
+        { id:"pressure_chance", label:"Tackle Chance", sub:"Time it now", tone:"good" },
+        { id:"space_behind", label:"Goal Exposed", sub:"Miss and he is in", tone:"warn" },
+      ],
+      activePlayerIds:["a_st","h_cb1","h_gk","h_dm","a_cm"],
+      visiblePlayerIds:["a_st","h_cb1","h_gk","h_dm","a_cm"],
+      supportOptionIds:["h_cb1","h_gk"], pressurePlayerIds:["h_cb1"], openPlayerIds:["a_st"],
+      crowdedZone:{ x:24, y:42, w:20, h:22, label:"last challenge" },
+      routePreview:{ from:"a_st", to:null, kind:"danger", label:"clear run" },
+      availableIntents:["step_in","hold_line","press_ball"], opponentBias:["drive_on","shoot_early","slip_runner"],
+      readMatrix:{
+        step_in:{ beats:"drive_on", losesTo:"shoot_early" },
+        hold_line:{ beats:"slip_runner", losesTo:"drive_on" },
+        press_ball:{ beats:"shoot_early", losesTo:"slip_runner" },
+      },
+      positions:{
+        a_st:{ x:38, y:45, pose:"run", runDir:-1 },
+        h_cb1:{ x:29, y:48, pose:"defend", angle:10 },
+        h_gk:{ x:9, y:50, pose:"defend" },
+        h_dm:{ x:25, y:62, pose:"defend" },
+        a_cm:{ x:52, y:59, pose:"idle" },
       },
     },
     {
@@ -1209,7 +1451,8 @@ export const CW = { win:18, draw:8, loss:4, gol:3, cs:5 };
 
 // ─── REWARDS ──────────────────────────────────────────────────────────────────
 export const REWARDS = {
-  firstWin:   { rep:25, title:"FIRST VICTORY", sub:"Your journey begins",     icon:"🏆", extras:["🎁 Lucky Dip","⚡ Bonus XP"],       type:"green" },
+  firstPlay:  { coins:50, title:"FIRST MATCH", sub:"50 ZAP added to your clubhouse", icon:"⚡", badgeImage:"/assets/icons/coin.png", extras:["50 ZAP COIN"], type:"green" },
+  firstWin:   { rep:25, title:"FIRST VICTORY", sub:"Your journey begins",     icon:"🏆", badgeImage:"/assets/icons/medal.png", extras:["🎁 Lucky Dip","⚡ Bonus XP"],       type:"green" },
   fiveStreak: { rep:50, title:"LEGENDARY RUN", sub:"Five wins on the bounce", icon:"🔥", extras:["👑 Streak Badge","💎 Elite Pack"], type:"gold"  },
 };
 
@@ -1224,24 +1467,24 @@ export const RARITY_COL = { common:"#9ab5a0", rare:"#60a5fa", elite:"#d4a017" };
 
 // ─── TIERS ────────────────────────────────────────────────────────────────────
 export const TIERS = [
-  { name:"Master League", short:"MASTER", icon:"👑", col:"#d4a017", bg:"rgba(212,160,23,.12)",  min:1,  max:10 },
-  { name:"Professional",  short:"PRO",    icon:"⭐", col:"#18c158", bg:"rgba(24,193,88,.12)",   min:11, max:20 },
-  { name:"Elite League",  short:"ELITE",  icon:"🔥", col:"#a78bfa", bg:"rgba(167,139,250,.12)", min:21, max:30 },
-  { name:"Amateur",       short:"AMT",    icon:"🎯", col:"#34d399", bg:"rgba(52,211,153,.12)",  min:31, max:40 },
-  { name:"Rookie",        short:"ROOKIE", icon:"🌱", col:"#94a3b8", bg:"rgba(148,163,184,.1)",  min:41, max:50 },
+  { name:"Master League", short:"MASTER", icon:"👑", logo:"/assets/leagues/master.png", col:"#d4a017", bg:"rgba(212,160,23,.12)",  min:1,  max:10, repMin:320, repMax:9999 },
+  { name:"Professional",  short:"PRO",    icon:"⭐", logo:"/assets/leagues/professional.png", col:"#18c158", bg:"rgba(24,193,88,.12)",   min:11, max:20, repMin:250, repMax:319 },
+  { name:"Elite League",  short:"ELITE",  icon:"🔥", logo:"/assets/leagues/elite.png", col:"#a78bfa", bg:"rgba(167,139,250,.12)", min:21, max:30, repMin:150, repMax:249 },
+  { name:"Amateur",       short:"AMT",    icon:"🎯", logo:"/assets/leagues/amateur.png", col:"#34d399", bg:"rgba(52,211,153,.12)",  min:31, max:40, repMin:80,  repMax:149 },
+  { name:"Rookie",        short:"ROOKIE", icon:"🌱", logo:"/assets/leagues/rookie.png", col:"#94a3b8", bg:"rgba(148,163,184,.1)",  min:41, max:50, repMin:0,   repMax:79 },
 ];
 
 // ─── FORMATIONS ───────────────────────────────────────────────────────────────
 export const FORMATIONS = [
-  { id:"press-433",    shape:"4-3-3", name:"Press 4-3-3",   desc:"Aggressive front-foot shape for quick attacks.",        mods:{ atk:2, mid:1, def:-1 } },
-  { id:"control-433",  shape:"4-3-3", name:"Control 4-3-3", desc:"Balanced shape built on midfield circulation.",         mods:{ atk:1, mid:2, def:0  } },
-  { id:"pivot-4231",   shape:"4-2-3-1", name:"Pivot 4-2-3-1", desc:"Double pivot control with quick runners between lines.", mods:{ atk:2, mid:0, def:1  } },
-  { id:"classic-442",  shape:"4-4-2", name:"Classic 4-4-2", desc:"Solid structure with support in every lane.",           mods:{ atk:1, mid:1, def:1  } },
-  { id:"diamond-41212",shape:"4-1-2-1-2", name:"Diamond 4-1-2-1-2", desc:"Central overload built for slip passes and second balls.", mods:{ atk:1, mid:3, def:-1 } },
-  { id:"wide-352",     shape:"3-5-2", name:"Wide 3-5-2",    desc:"Wing-back width with numbers around midfield.",         mods:{ atk:1, mid:3, def:0  } },
-  { id:"storm-343",    shape:"3-4-3", name:"Storm 3-4-3",   desc:"Heavy attacking front line that accepts defensive risk.", mods:{ atk:3, mid:0, def:-1 } },
-  { id:"lock-532",     shape:"5-3-2", name:"Lock 5-3-2",    desc:"Protect your box and hit direct counters.",             mods:{ atk:0, mid:1, def:2  } },
-  { id:"low-541",      shape:"5-4-1", name:"Low Block 5-4-1", desc:"Deep defensive shell for surviving dangerous opponents.", mods:{ atk:-1, mid:1, def:3 } },
+  { id:"press-433",    shape:"4-3-3", name:"Press 4-3-3",   desc:"Aggressive front-foot shape for quick attacks.",        minRep:0,   mods:{ atk:2, mid:1, def:-1 } },
+  { id:"control-433",  shape:"4-3-3", name:"Control 4-3-3", desc:"Balanced shape built on midfield circulation.",         minRep:0,   mods:{ atk:1, mid:2, def:0  } },
+  { id:"pivot-4231",   shape:"4-2-3-1", name:"Pivot 4-2-3-1", desc:"Double pivot control with quick runners between lines.", minRep:80,  mods:{ atk:2, mid:0, def:1  } },
+  { id:"classic-442",  shape:"4-4-2", name:"Classic 4-4-2", desc:"Solid structure with support in every lane.",           minRep:80,  mods:{ atk:1, mid:1, def:1  } },
+  { id:"diamond-41212",shape:"4-1-2-1-2", name:"Diamond 4-1-2-1-2", desc:"Central overload built for slip passes and second balls.", minRep:150, mods:{ atk:1, mid:3, def:-1 } },
+  { id:"wide-352",     shape:"3-5-2", name:"Wide 3-5-2",    desc:"Wing-back width with numbers around midfield.",         minRep:150, mods:{ atk:1, mid:3, def:0  } },
+  { id:"storm-343",    shape:"3-4-3", name:"Storm 3-4-3",   desc:"Heavy attacking front line that accepts defensive risk.", minRep:250, mods:{ atk:3, mid:0, def:-1 } },
+  { id:"lock-532",     shape:"5-3-2", name:"Lock 5-3-2",    desc:"Protect your box and hit direct counters.",             minRep:250, mods:{ atk:0, mid:1, def:2  } },
+  { id:"low-541",      shape:"5-4-1", name:"Low Block 5-4-1", desc:"Deep defensive shell for surviving dangerous opponents.", minRep:320, mods:{ atk:-1, mid:1, def:3 } },
 ];
 
 // ─── MCARDS ───────────────────────────────────────────────────────────────────

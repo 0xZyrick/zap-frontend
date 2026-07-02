@@ -25,7 +25,7 @@ export function useWallet() {
       connected: true,
       account: result?.account || starknetAccount,
       provider: starknetProvider,
-      address: result?.account || address,
+      address: result?.account?.address || address,
     };
   };
 

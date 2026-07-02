@@ -7,6 +7,8 @@
 //     and update the import paths below to match your filenames.
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { useEffect, useState } from "react";
+
 const idlePng    = "/assets/players/player_idle.png";
 const attackPng  = "/assets/players/player_attack.png";
 const defensePng = "/assets/players/player_defend.png";
@@ -82,6 +84,13 @@ function getGroundGlow(state) {
   return null;
 }
 
+function getAwayGroundGlow(state) {
+  if (state === "ballCarrier")   return "rgba(248,113,113,0.22)";
+  if (state === "underPressure") return "rgba(250,204,21,0.20)";
+  if (state === "open")          return "rgba(248,113,113,0.18)";
+  return null;
+}
+
 function getBadgeColor(state) {
   if (state === "ballCarrier")   return "rgba(96,165,250,0.95)";
   if (state === "open")          return "rgba(34,197,94,0.92)";
@@ -92,7 +101,14 @@ function getBadgeColor(state) {
 
 // ── component ────────────────────────────────────────────────────────────────
 
-export default function PlayerFigure({ p, isActive, isFar, context, previewIntentId, gs }) {
+export default function PlayerFigure({ p, isActive, isFar, context, previewIntentId, gs, reaction }) {
+  const [pos, setPos] = useState(() => p.enterFrom || { x:p.x, y:p.y });
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setPos({ x:p.x, y:p.y }));
+    return () => cancelAnimationFrame(raf);
+  }, [p.id, p.x, p.y]);
+
   const isHome = p.t === "h";
   const tags   = new Set(p.tags || []);
 
@@ -140,15 +156,22 @@ export default function PlayerFigure({ p, isActive, isFar, context, previewInten
     : 0.94;
 
   const pose       = getPose(state, gs, p.pose);
-  const groundGlow = isHome ? getGroundGlow(state) : null;
+  const groundGlow = isHome ? getGroundGlow(state) : getAwayGroundGlow(state);
 
   // Home: full colour + glow  |  Away: dark silhouette
   const imgFilter = isHome
     ? getHomeFilter(state)
-    : "brightness(0.52) saturate(0.45) sepia(0.6) hue-rotate(320deg) contrast(1.1) drop-shadow(0 2px 6px rgba(0,0,0,0.55))";
+    : state === "ballCarrier" || state === "underPressure"
+      ? "brightness(0.48) saturate(0.25) sepia(0.95) hue-rotate(322deg) contrast(1.22) drop-shadow(0 0 12px rgba(248,113,113,0.36)) drop-shadow(0 2px 7px rgba(0,0,0,0.72))"
+      : "brightness(0.38) grayscale(0.48) saturate(0.28) sepia(0.7) hue-rotate(320deg) contrast(1.18) drop-shadow(0 2px 7px rgba(0,0,0,0.72))";
 
   const lean = p.angle || 0;
   const imgTransform = `${isHome ? "" : "scaleX(-1) "}rotate(${lean}deg)`;
+  const isReacting = reaction?.playerId === p.id;
+  const reactionDir = isHome ? 1 : -1;
+  const reactionX = isReacting ? (reaction.ok ? 10 * reactionDir : -8 * reactionDir) : 0;
+  const reactionRotate = isReacting && !reaction.ok ? -8 * reactionDir : 0;
+  const wrapperTransform = `translate(-50%, -50%) translateX(${reactionX}px) rotate(${reactionRotate}deg)`;
 
   // Pulse animation class
   const anim = state === "ballCarrier"
@@ -157,18 +180,20 @@ export default function PlayerFigure({ p, isActive, isFar, context, previewInten
       ? "figurePressurePulse 0.55s ease-in-out infinite"
       : "none";
 
-  const showBadge = isHome && figH >= 40 && isPhaseKey;
+  const showBadge = figH >= 40 && isPhaseKey && (isHome || isActive || isPressure || isOpen);
+  const badgeBg = isHome ? getBadgeColor(state) : "rgba(96,12,12,0.88)";
 
   return (
     <div
       style={{
         position: "absolute",
-        left: p.x + "%",
-        top:  p.y + "%",
-        transform: "translate(-50%, -50%)",
+        left: pos.x + "%",
+        top:  pos.y + "%",
+        transform: wrapperTransform,
         transition:
           "left .42s cubic-bezier(.2,.82,.22,1), " +
           "top  .42s cubic-bezier(.2,.82,.22,1), " +
+          "transform .3s cubic-bezier(.2,.82,.22,1), " +
           "opacity .28s ease",
         opacity,
         zIndex: isActive ? 12
@@ -251,7 +276,7 @@ export default function PlayerFigure({ p, isActive, isFar, context, previewInten
             position: "absolute",
             bottom: "-15px", left: "50%",
             transform: "translateX(-50%)",
-            background: getBadgeColor(state),
+            background: badgeBg,
             color: "#fff",
             fontFamily: "var(--f-disp,monospace)",
             fontSize: Math.max(8, figH * 0.16) + "px",
@@ -261,7 +286,7 @@ export default function PlayerFigure({ p, isActive, isFar, context, previewInten
             borderRadius: "4px",
             whiteSpace: "nowrap",
             letterSpacing: "0.04em",
-            boxShadow: "0 1px 5px rgba(0,0,0,0.65)",
+            boxShadow: isHome ? "0 1px 5px rgba(0,0,0,0.65)" : "0 1px 5px rgba(0,0,0,0.72),0 0 0 1px rgba(248,113,113,.28)",
           }}>
             {ROLE_NUMBERS[p.role] || "?"}
           </div>

@@ -20,6 +20,7 @@ export const GLOBAL_CSS = `
 *  { box-sizing:border-box; margin:0; padding:0; -webkit-tap-highlight-color:transparent }
 html,body { width:100%; height:100%; background:#020504; color:var(--tx); font-family:var(--f-body); overflow:hidden }
 button { cursor:pointer; font-family:inherit; border:none; outline:none; background:none }
+img { user-select:none; -webkit-user-select:none; -webkit-user-drag:none }
 
 /* ── Keyframes ── */
 @keyframes bounceIn        { 0%{transform:scale(.1) rotate(-20deg);opacity:0} 55%{transform:scale(1.25) rotate(6deg);opacity:1} 75%{transform:scale(.9) rotate(-3deg)} 100%{transform:scale(1) rotate(0);opacity:1} }
@@ -38,6 +39,7 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
 @keyframes vxBounceFast    { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-5px)} }
 @keyframes vxCelebrate     { 0%{transform:translateY(0) rotate(0)} 25%{transform:translateY(-10px) rotate(-10deg)} 50%{transform:translateY(-12px) rotate(0)} 75%{transform:translateY(-10px) rotate(10deg)} 100%{transform:translateY(0) rotate(0)} }
 @keyframes ballPulse       { 0%,100%{box-shadow:0 0 8px rgba(255,255,255,.95),0 0 18px rgba(255,255,255,.4)} 50%{box-shadow:0 0 15px rgba(255,255,255,1),0 0 30px rgba(255,255,255,.65)} }
+@keyframes coinFlip        { 0%{transform:rotateY(0) translateY(0) scale(.9)} 42%{transform:rotateY(520deg) translateY(-10px) scale(1.08)} 100%{transform:rotateY(720deg) translateY(0) scale(1)} }
 @keyframes rewardPop       { 0%{transform:scale(.55) translateY(40px);opacity:0} 100%{transform:scale(1) translateY(0);opacity:1} }
 @keyframes confettiFall    { 0%{opacity:1;transform:translateY(-20px) rotate(0)} 80%{opacity:.8} 100%{opacity:0;transform:translateY(110%) rotate(720deg)} }
 @keyframes flameRise       { 0%{opacity:.95;transform:translateY(0) scale(1)} 60%{opacity:.65;transform:translateY(-50px) scale(.8)} 100%{opacity:0;transform:translateY(-90px) scale(.2)} }
@@ -74,6 +76,10 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
 @keyframes decisionCardGlow { 0%,100%{border-color:#22d35f77;box-shadow:0 0 16px rgba(34,211,95,.15)} 50%{border-color:#22d35faa;box-shadow:0 0 32px rgba(34,211,95,.25)} }
 @keyframes readGlyphRoute   { 0%{opacity:.74;filter:brightness(1)} 50%{opacity:1;filter:brightness(1.25)} 100%{opacity:.74;filter:brightness(1)} }
 @keyframes readCardSheen    { 0%{transform:translateY(140%);opacity:0} 36%{opacity:.26} 100%{transform:translateY(-230%);opacity:0} }
+@keyframes readMomentPulse  { 0%,100%{box-shadow:0 24px 80px rgba(0,0,0,.62),0 0 34px rgba(250,204,21,.18),inset 0 1px 0 rgba(255,255,255,.08)} 50%{box-shadow:0 24px 90px rgba(0,0,0,.68),0 0 54px rgba(34,211,95,.28),inset 0 1px 0 rgba(255,255,255,.12)} }
+@keyframes readProgress     { 0%{width:18%;transform:translateX(-35%)} 55%{width:64%;transform:translateX(62%)} 100%{width:28%;transform:translateX(330%)} }
+@keyframes readFeedbackIn   { 0%{opacity:0;transform:translate(-50%,-14px)} 100%{opacity:1;transform:translate(-50%,0)} }
+@keyframes thinkingDot      { 0%,100%{opacity:.28;transform:translateY(0) scale(.86)} 45%{opacity:1;transform:translateY(-3px) scale(1.12)} }
 
 /* ── Player glow states ── */
 @keyframes youGlowPulse    { 0%,100%{filter:drop-shadow(0 0 10px rgba(251,191,36,1))  drop-shadow(0 0 26px rgba(251,191,36,.65)) drop-shadow(0 5px 16px rgba(0,0,0,.95))} 50%{filter:drop-shadow(0 0 18px rgba(251,191,36,1)) drop-shadow(0 0 42px rgba(251,191,36,.88))  drop-shadow(0 5px 16px rgba(0,0,0,.95))} }
@@ -116,8 +122,8 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
   position:absolute;
   left:8%;
   right:8%;
-  top:-34px;
-  height:76px;
+  top:-24px;
+  height:56px;
   z-index:0;
   pointer-events:none;
   opacity:0;
@@ -125,7 +131,7 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
   background:
     radial-gradient(ellipse 58% 72% at 50% 100%, color-mix(in srgb, var(--read-col) 46%, transparent), transparent 72%),
     linear-gradient(180deg, transparent, color-mix(in srgb, var(--read-col) 22%, transparent));
-  filter:blur(7px);
+  filter:blur(6px);
   transition:opacity .2s ease, transform .2s ease;
 }
 
@@ -152,7 +158,7 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
   left:8%;
   right:8%;
   bottom:0;
-  height:46%;
+  height:38%;
   z-index:0;
   pointer-events:none;
   background:
@@ -176,14 +182,45 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
   opacity:0;
 }
 
+.read-action-card__sub {
+  display:grid;
+}
+
+.read-action-card__sub-default,
+.read-action-card__sub-hover {
+  grid-area:1 / 1;
+  min-width:0;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  transition:opacity .14s ease, transform .14s ease, color .14s ease;
+}
+
+.read-action-card__sub-hover {
+  color:rgba(255,255,255,.92);
+  opacity:0;
+  transform:translateY(4px);
+}
+
+.read-action-button:not(:disabled):hover .read-action-card__sub-default,
+.read-action-button:not(:disabled):focus-visible .read-action-card__sub-default {
+  opacity:0;
+  transform:translateY(-4px);
+}
+
+.read-action-button:not(:disabled):hover .read-action-card__sub-hover,
+.read-action-button:not(:disabled):focus-visible .read-action-card__sub-hover {
+  opacity:1;
+  transform:translateY(0);
+}
+
 .read-action-button:not(:disabled):hover .read-action-card,
 .read-action-button:not(:disabled):focus-visible .read-action-card {
-  transform:translateY(-4px);
+  transform:translateY(-2px);
   border-color:var(--read-col)!important;
   box-shadow:
-    0 18px 40px rgba(0,0,0,.52),
+    0 12px 26px rgba(0,0,0,.5),
     0 0 0 1px color-mix(in srgb, var(--read-col) 32%, transparent),
-    0 0 28px color-mix(in srgb, var(--read-col) 34%, transparent),
+    0 0 20px color-mix(in srgb, var(--read-col) 30%, transparent),
     inset 0 1px 0 rgba(255,255,255,.12)!important;
 }
 
@@ -210,14 +247,14 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
 }
 
 .read-action-button:not(:disabled):active .read-action-card {
-  transform:translateY(-1px) scale(.985);
+  transform:translateY(0) scale(.99);
 }
 
 .read-glyph {
   position:relative;
-  width:54px;
-  height:54px;
-  border-radius:8px;
+  width:42px;
+  height:42px;
+  border-radius:7px;
   flex-shrink:0;
   overflow:hidden;
   background:
@@ -245,18 +282,18 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
 .read-glyph__midline {
   position:absolute;
   left:50%;
-  top:5px;
-  bottom:5px;
+  top:4px;
+  bottom:4px;
   width:1px;
   background:rgba(255,255,255,.18);
 }
 
 .read-glyph__box {
   position:absolute;
-  right:5px;
-  top:14px;
-  width:10px;
-  height:22px;
+  right:4px;
+  top:11px;
+  width:8px;
+  height:18px;
   border:1px solid rgba(255,255,255,.14);
   border-right:0;
   border-radius:4px 0 0 4px;
@@ -270,7 +307,7 @@ button { cursor:pointer; font-family:inherit; border:none; outline:none; backgro
 .read-action-button:not(:disabled):hover .read-glyph,
 .read-action-button:not(:disabled):focus-visible .read-glyph {
   box-shadow:
-    0 0 22px color-mix(in srgb, var(--glyph-col) 40%, transparent),
+    0 0 16px color-mix(in srgb, var(--glyph-col) 38%, transparent),
     inset 0 1px 0 rgba(255,255,255,.14),
     inset 0 0 0 1px rgba(255,255,255,.05);
 }

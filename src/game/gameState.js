@@ -9,7 +9,7 @@
 //   recalcTeamState() → re-derive boost values from squad/starters/formation
 //   ranked()          → full leaderboard array sorted by rep, with .rank
 //   myRank()          → player's current rank number
-//   getTier()         → TIER entry for a given rank number
+//   getTier()         → TIER entry for a REP value
 //   getFormation()    → FORMATIONS entry by id
 //   getCard()         → MCARDS entry by id
 
@@ -24,7 +24,7 @@ import { clamp, rand01 } from "./gameLogic.js";
 
 export const getCard      = (id) => MCARDS.find(c => c.id === id) || null;
 export const getFormation = (id) => FORMATIONS.find(f => f.id === id) || FORMATIONS[1];
-export const getTier      = (r)  => TIERS.find(t => r >= t.min && r <= t.max) || TIERS[4];
+export const getTier      = (rep)  => TIERS.find(t => rep >= (t.repMin ?? t.min) && rep <= (t.repMax ?? t.max)) || TIERS[4];
 
 export const formatClubName = (name) => {
   const cleaned = String(name || "")
@@ -45,14 +45,20 @@ export const defS = () => ({
   onchainRegistered:    false,
   clubName:             "ZAP",
   clubCreated:          false,
+  clubIdentitySet:      false,
+  clubIdentityPrompted: false,
   rep:                  50,
-  coins:                80,
+  coins:                0,
   wins:                 0,
   losses:               0,
   draws:                0,
   streak:               0,
   total:                0,
+  firstPlayClaimed:     false,
   firstWinClaimed:      false,
+  missionClaims:        {},
+  crestRequested:       false,
+  crestRequestPending:  false,
   streakRewardsClaimed: {},
   roster:               [],
   squad:                [],
@@ -129,8 +135,10 @@ export const recalcTeamState = (state) => {
 export const normalizeState = (raw) => {
   const base       = { ...defS(), ...(raw || {}) };
   base.clubName = formatClubName(base.clubName);
-  if (raw && raw.clubCreated === undefined && base.clubName && base.clubName !== "ZAP") {
+  const genericClubName = base.clubName === "ZAP FC";
+  if (raw && base.clubName && !genericClubName) {
     base.clubCreated = true;
+    base.clubIdentitySet = true;
   }
   const legacyRostr = Array.isArray(base.roster) ? base.roster.filter(Boolean) : [];
   const squad      = [...new Set([...(base.squad || []), ...legacyRostr])].slice(0, SQUAD_LIMIT);
@@ -143,7 +151,7 @@ export const normalizeState = (raw) => {
     }
   });
 
-  if (base.coins === undefined) base.coins = 80;
+  if (base.coins === undefined) base.coins = 0;
 
   return recalcTeamState({ ...base, squad, starters });
 };

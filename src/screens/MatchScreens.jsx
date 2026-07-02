@@ -1,14 +1,39 @@
 // ─── PreMatchScreen.jsx ───────────────────────────────────────────────────────
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { FORMATIONS } from "../game/constants.js";
 import { getFormation, getCard } from "../game/gameState.js";
 import { clamp } from "../game/gameLogic.js";
 import { StadiumEnvironment } from "../pitch/pitch.jsx";
+import { ScreenBackButton } from "./HomeScreens.jsx";
 
-export function PreMatchScreen({ S, onKickOff, onBack }) {
+const HOME_BG = "/assets/bg/home-bg.png";
+const WHISTLE_ICON = "/assets/icons/whistle.png";
+const CRESTS = {
+  derick: "/assets/crests/derick.png",
+  derickfc: "/assets/crests/derick.png",
+  elmaestro: "/assets/crests/el-maestro.png",
+  phantomxi: "/assets/crests/phantom-xi.png",
+  codmai: "/assets/crests/codmai.png",
+  skyfoot: "/assets/crests/sky-foot.png",
+  ghoststrike: "/assets/crests/ghost-strike.png",
+};
+
+function assetKey(name = "") {
+  return name
+    .toLowerCase()
+    .replace(/\bfc\b/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function crestSrc(name) {
+  return CRESTS[assetKey(name)] || null;
+}
+
+export function PreMatchScreen({ S, onKickOff, onBack, teamOnly = false }) {
   const [selId, setSelId] = useState(S.formationId || "control-433");
   const sel = getFormation(selId);
+  const selectedLocked = (S?.rep || 0) < (sel.minRep || 0);
 
   const computeStats = (fId) => {
     const f  = getFormation(fId);
@@ -45,15 +70,7 @@ export function PreMatchScreen({ S, onKickOff, onBack }) {
     <div style={{ position:"absolute", inset:0, background:"#07100b", display:"flex", flexDirection:"column", animation:"flashIn .25s ease", overflow:"hidden" }}>
       <div style={{ position:"absolute", inset:0, background:"radial-gradient(circle at 18% 20%,rgba(24,193,88,.14),transparent 34%),radial-gradient(circle at 78% 30%,rgba(212,160,23,.08),transparent 30%),linear-gradient(180deg,#07100b 0%,#020504 100%)", pointerEvents:"none" }}/>
       <div style={{ position:"absolute", inset:0, backgroundImage:"linear-gradient(rgba(24,193,88,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(24,193,88,.035) 1px,transparent 1px)", backgroundSize:"28px 28px", pointerEvents:"none", opacity:.7 }}/>
-
-      {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", padding:"14px 16px", borderBottom:"1px solid rgba(255,255,255,.07)", flexShrink:0, zIndex:2, background:"rgba(3,8,5,.72)", backdropFilter:"blur(14px)" }}>
-        <div style={{ display:"flex", alignItems:"center", gap:"10px" }}>
-          <button onClick={onBack} style={{ width:"32px", height:"32px", borderRadius:"8px", background:"rgba(255,255,255,.06)", border:"1px solid rgba(255,255,255,.08)", color:"var(--tx2)", fontSize:"14px", display:"flex", alignItems:"center", justifyContent:"center" }}>←</button>
-          <span style={{ fontFamily:"var(--f-disp)", fontSize:"22px", letterSpacing:"2px" }}>PRE-MATCH</span>
-        </div>
-        <div style={{ padding:"5px 12px", borderRadius:"999px", background:"rgba(212,160,23,.1)", border:"1px solid rgba(212,160,23,.25)", fontFamily:"var(--f-mono)", fontSize:"8px", color:"var(--gold)", letterSpacing:".14em" }}>vs Rival FC</div>
-      </div>
+      <ScreenBackButton onClick={onBack} />
 
       <div className="prematch-main">
         {/* Field preview */}
@@ -121,7 +138,7 @@ export function PreMatchScreen({ S, onKickOff, onBack }) {
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:"10px", flexShrink:0 }}>
             <div>
               <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".2em", color:"var(--green)", marginBottom:"3px" }}>FORMATION OPTIONS</div>
-              <div style={{ fontFamily:"var(--f-cond)", fontWeight:800, fontSize:"14px", color:"var(--tx2)", letterSpacing:".06em" }}>Pick your match shape</div>
+              <div style={{ fontFamily:"var(--f-cond)", fontWeight:800, fontSize:"14px", color:"var(--tx2)", letterSpacing:".06em" }}>{teamOnly ? "Set the shape used from Kick Off" : "Pick your match shape"}</div>
             </div>
             <div style={{ width:"8px", height:"8px", borderRadius:"50%", background:"var(--green)", boxShadow:"0 0 14px rgba(24,193,88,.8)" }}/>
           </div>
@@ -131,23 +148,27 @@ export function PreMatchScreen({ S, onKickOff, onBack }) {
               {FORMATIONS.map((f, fi) => {
                 const st     = computeStats(f.id);
                 const active = selId === f.id;
+                const locked = (S?.rep || 0) < (f.minRep || 0);
+                const needed = Math.max(0, (f.minRep || 0) - (S?.rep || 0));
                 return (
-                  <button key={f.id} onClick={() => setSelId(f.id)} style={{
+                  <button key={f.id} disabled={locked} onClick={() => setSelId(f.id)} style={{
                     padding:"12px",
                     borderRadius:"12px",
-                    border:`1.5px solid ${active?"var(--green)":"rgba(255,255,255,.08)"}`,
-                    background:active?"linear-gradient(135deg,rgba(24,193,88,.14),rgba(255,255,255,.035))":"rgba(255,255,255,.025)",
+                    border:`1.5px solid ${active?"var(--green)":locked?"rgba(255,255,255,.045)":"rgba(255,255,255,.08)"}`,
+                    background:locked?"rgba(255,255,255,.015)":active?"linear-gradient(135deg,rgba(24,193,88,.14),rgba(255,255,255,.035))":"rgba(255,255,255,.025)",
                     textAlign:"left",
-                    cursor:"pointer",
+                    cursor:locked?"not-allowed":"pointer",
+                    opacity:locked ? .75 : 1,
                     animation:`formCardIn .3s ${fi*0.07}s ease both`,
                     boxShadow:active?"0 0 0 1px rgba(24,193,88,.08),0 12px 32px rgba(24,193,88,.1)":"none",
                   }}>
                     <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:"10px", marginBottom:"8px" }}>
                       <div>
-                        <div style={{ fontFamily:"var(--f-disp)", fontSize:"24px", letterSpacing:"1.5px", color:active?"var(--green)":"var(--tx)", lineHeight:1 }}>{f.shape}</div>
+                        <div style={{ fontFamily:"var(--f-disp)", fontSize:"24px", letterSpacing:"1.5px", color:locked?"rgba(255,255,255,.32)":active?"var(--green)":"var(--tx)", lineHeight:1 }}>{f.shape}</div>
                         <div style={{ fontFamily:"var(--f-cond)", fontWeight:700, fontSize:"12px", color:"rgba(238,245,240,.68)", marginTop:"2px" }}>{f.name}</div>
+                        {locked && <div style={{ fontFamily:"var(--f-mono)", fontSize:"6.5px", color:"#facc15", letterSpacing:".12em", marginTop:"5px" }}>{needed} ZAP NEEDED · {f.minRep} REP</div>}
                       </div>
-                      <div style={{ width:"22px", height:"22px", borderRadius:"50%", border:`1px solid ${active?"var(--green)":"rgba(255,255,255,.12)"}`, display:"flex", alignItems:"center", justifyContent:"center", color:active?"var(--green)":"transparent", fontFamily:"var(--f-mono)", fontSize:"12px", flexShrink:0 }}>✓</div>
+                      <div style={{ width:"22px", height:"22px", borderRadius:"50%", border:`1px solid ${active?"var(--green)":locked?"rgba(250,204,21,.26)":"rgba(255,255,255,.12)"}`, display:"flex", alignItems:"center", justifyContent:"center", color:active?"var(--green)":locked?"#facc15":"transparent", fontFamily:"var(--f-mono)", fontSize:"12px", flexShrink:0 }}>{locked ? "⌁" : "✓"}</div>
                     </div>
                     <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"6px" }}>
                       {[{k:"def",l:"DEF",v:st.def,c:"#60a5fa"},{k:"mid",l:"MID",v:st.mid,c:"#facc15"},{k:"atk",l:"ATK",v:st.atk,c:"#f87171"}].map(s=>(
@@ -168,7 +189,9 @@ export function PreMatchScreen({ S, onKickOff, onBack }) {
             </div>
           </div>
 
-          <button onClick={() => onKickOff(selId)} style={{ marginTop:"12px", width:"100%", padding:"16px", borderRadius:"12px", background:"var(--green)", color:"var(--bg)", fontFamily:"var(--f-disp)", fontSize:"19px", letterSpacing:"3px", boxShadow:"0 0 30px rgba(24,193,88,.34)", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", flexShrink:0 }}>KICK OFF <span>→</span></button>
+          <button disabled={selectedLocked} onClick={() => onKickOff(selId)} style={{ marginTop:"12px", width:"100%", padding:"16px", borderRadius:"12px", background:selectedLocked?"rgba(255,255,255,.08)":"var(--green)", color:selectedLocked?"rgba(255,255,255,.34)":"var(--bg)", fontFamily:"var(--f-disp)", fontSize:"19px", letterSpacing:"3px", boxShadow:selectedLocked?"none":"0 0 30px rgba(24,193,88,.34)", cursor:selectedLocked?"not-allowed":"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:"10px", flexShrink:0 }}>
+            {selectedLocked ? `${Math.max(0, (sel.minRep || 0) - (S?.rep || 0))} ZAP NEEDED` : teamOnly ? "SAVE FORMATION" : "KICK OFF"} <span>{selectedLocked ? "⌁" : teamOnly ? "✓" : "→"}</span>
+          </button>
         </aside>
       </div>
     </div>
@@ -177,135 +200,164 @@ export function PreMatchScreen({ S, onKickOff, onBack }) {
 
 // ─── MatchFoundScreen.jsx ─────────────────────────────────────────────────────
 
-export function MatchFoundScreen({ S, onKickOff, onChangeFormation }) {
-  const [searching, setSearching] = useState(true);
-  const [opponent] = useState(() => {
-    const names = [
-      "Apex Rovers",
-      "Iron Gate FC",
-      "Northbridge XI",
-      "Metro Albion",
-      "Harbor Athletic",
-      "Crown Park FC",
-      "Redline United",
-      "Union Vale",
-      "Velocity City",
-      "Eastbank Rangers",
-    ];
-    const name = names[Math.floor(Math.random() * names.length)];
-    const rep = Math.max(10, Math.round(S.rep * (0.72 + Math.random() * 0.56)));
-    return { name, rep };
-  });
+const systemDifficulty = (S) => {
+  const played = S?.total || 0;
+  const rep = S?.rep || 50;
+  const streak = S?.streak || 0;
+  if (played === 0) return "easy";
+  if (played < 3 && rep < 90) return "medium";
+  if (streak >= 3 || rep >= 120 || played >= 7) return "hard";
+  return "medium";
+};
 
-  useEffect(() => {
-    const t = setTimeout(() => setSearching(false), 1650);
-    return () => clearTimeout(t);
-  }, []);
+const opponentRepForDifficulty = (S, difficulty) => {
+  const rep = S?.rep || 50;
+  const ranges = {
+    easy:   [0.58, 0.82],
+    medium: [0.86, 1.12],
+    hard:   [1.06, 1.34],
+  };
+  const [lo, hi] = ranges[difficulty] || ranges.medium;
+  return Math.max(10, Math.round(rep * (lo + Math.random() * (hi - lo))));
+};
+
+const OPPONENT_RAIL = [
+  { name:"Phantom XI", difficulty:"medium", rarity:"COMMON", acc:"61%" },
+  { name:"Codmai", difficulty:"hard", rarity:"RARE", acc:"68%" },
+  { name:"Sky Foot", difficulty:"easy", rarity:"COMMON", acc:"56%" },
+  { name:"Ghost Strike", difficulty:"hard", rarity:"ELITE", acc:"72%" },
+  { name:"El Maestro", difficulty:"medium", rarity:"RARE", acc:"64%" },
+];
+
+export function MatchFoundScreen({ S, selectedFormationId, onSelectFormation, onKickOff, onBack }) {
+  const [opponents] = useState(() => {
+    const preferred = systemDifficulty(S);
+    const sorted = [...OPPONENT_RAIL].sort((a, b) => (a.difficulty === preferred ? -1 : 0) - (b.difficulty === preferred ? -1 : 0));
+    return sorted.map((item) => ({ ...item, rep: opponentRepForDifficulty(S, item.difficulty) }));
+  });
+  const [opponentIndex, setOpponentIndex] = useState(0);
+  const [formationOpen, setFormationOpen] = useState(false);
+  const opponent = opponents[opponentIndex] || opponents[0];
+  const activeFormationId = selectedFormationId || S?.formationId || "control-433";
+  const activeFormation = getFormation(activeFormationId);
+  const formationLocked = (S?.rep || 0) < (activeFormation?.minRep || 0);
+  const moveOpponent = (dir) => {
+    setOpponentIndex((idx) => (idx + dir + opponents.length) % opponents.length);
+  };
 
   const opponentRep = opponent.rep;
   const opponentName = opponent.name;
-  const diff    = Math.abs(S.rep - opponentRep);
-  const winRep  = Math.max(6,  Math.min(25, Math.round(8  + diff * 0.12)));
-  const lossRep = Math.max(8,  Math.min(20, Math.round(10 + diff * 0.1)));
-  const oppColors = ["#7c3aed","#b91c1c","#0e7490","#166534","#334155","#6d28d9","#0f766e"];
-  const oppCol  = oppColors[Math.round(opponentRep) % oppColors.length];
   const oppInit = opponentName.split(" ").map(w=>w[0]).join("").slice(0,3).toUpperCase();
   const myInit  = (S.clubName || "ZAP").split(" ").map(w=>w[0]).join("").slice(0,3).toUpperCase();
-  const repGap = opponentRep - (S.rep || 0);
-  const searchRows = [
-    { label:"FORM", value:"RECENTLY ACTIVE" },
-    { label:"RANGE", value:`REP ${Math.max(10, S.rep - 18)}-${S.rep + 24}` },
-    { label:"RULESET", value:"RANKED FRIENDLY" },
-  ];
-
-  if (searching) {
-    return (
-      <div style={{ position:"absolute", inset:0, overflow:"hidden", animation:"flashIn .3s ease", background:"#06110c" }}>
-        <StadiumEnvironment gs="MIDFIELD"/>
-        <div style={{ position:"absolute", inset:0, background:"linear-gradient(90deg,rgba(2,6,4,.94),rgba(2,6,4,.58),rgba(2,6,4,.94)),radial-gradient(ellipse 60% 64% at 50% 42%,rgba(24,193,88,.16),transparent 68%)" }}/>
-        <div style={{ position:"relative", zIndex:2, height:"100%", display:"grid", gridTemplateRows:"auto 1fr auto", padding:"18px", gap:"14px" }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-            <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".3em", color:"var(--green)" }}>SCOUTING OPPONENT</div>
-            <button onClick={onChangeFormation} style={{ padding:"7px 11px", borderRadius:"999px", border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.05)", color:"var(--tx2)", fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".12em" }}>CHANGE SHAPE</button>
-          </div>
-
-          <div style={{ width:"min(780px,100%)", margin:"auto", display:"grid", gap:"16px" }}>
-            <div style={{ textAlign:"center" }}>
-              <div style={{ fontFamily:"var(--f-disp)", fontSize:"clamp(48px,8vw,88px)", letterSpacing:"4px", color:"var(--tx)", lineHeight:.9 }}>FINDING MATCH</div>
-              <div style={{ margin:"12px auto 0", width:"min(420px,88vw)", height:"4px", borderRadius:"999px", overflow:"hidden", background:"rgba(255,255,255,.08)" }}>
-                <div style={{ height:"100%", width:"42%", borderRadius:"999px", background:"linear-gradient(90deg,transparent,var(--green),transparent)", animation:"scanSweep 1.2s ease-in-out infinite" }}/>
-              </div>
-            </div>
-
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))", gap:"10px" }}>
-              {searchRows.map((row, i) => (
-                <div key={row.label} style={{ padding:"13px 14px", borderRadius:"12px", background:"rgba(3,8,5,.78)", border:"1px solid rgba(255,255,255,.08)", animation:`splashFade .35s ${i*.08}s ease both` }}>
-                  <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".2em", color:"rgba(255,255,255,.36)", marginBottom:"7px" }}>{row.label}</div>
-                  <div style={{ fontFamily:"var(--f-cond)", fontSize:"15px", fontWeight:800, color:"var(--tx2)", letterSpacing:".06em" }}>{row.value}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div style={{ width:"min(560px,100%)", margin:"0 auto", display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:"10px", alignItems:"center" }}>
-            <div style={{ height:"1px", background:"linear-gradient(90deg,transparent,rgba(24,193,88,.42))" }}/>
-            <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".18em", color:"rgba(24,193,88,.72)", animation:"loadPulse 1.1s ease-in-out infinite" }}>PAIRING</div>
-            <div style={{ height:"1px", background:"linear-gradient(90deg,rgba(24,193,88,.42),transparent)" }}/>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
+  const myClubName = S.clubName || "ZAP FC";
+  const myWins = Math.max(0, S?.wins ?? 5);
+  const myDraws = Math.max(0, S?.draws ?? 1);
+  const myLosses = Math.max(0, S?.losses ?? 0);
+  const oppWins = opponent.difficulty === "hard" ? 7 : opponent.difficulty === "medium" ? 6 : 5;
+  const oppDraws = 1;
+  const oppLosses = opponent.difficulty === "hard" ? 1 : 0;
   return (
     <div style={{ position:"absolute", inset:0, overflow:"hidden", animation:"flashIn .3s ease", background:"#06110c" }}>
-      <StadiumEnvironment gs="MIDFIELD"/>
-      <div style={{ position:"absolute", inset:0, background:"radial-gradient(ellipse 70% 78% at 50% 48%,rgba(24,193,88,.12),transparent 64%),linear-gradient(90deg,rgba(2,6,4,.92),rgba(2,6,4,.48),rgba(2,6,4,.92))" }}/>
+      <div style={{ position:"absolute", inset:0, background:`linear-gradient(90deg,rgba(2,6,4,.92),rgba(2,6,4,.48),rgba(2,6,4,.92)),linear-gradient(180deg,rgba(2,6,4,.72),rgba(2,6,4,.38) 42%,rgba(2,6,4,.88)),url("${HOME_BG}") center / cover no-repeat` }}/>
+      <div style={{ position:"absolute", inset:0, background:"radial-gradient(ellipse 64% 62% at 50% 55%,rgba(34,197,94,.14),transparent 68%)" }}/>
 
-      <div style={{ position:"relative", zIndex:2, height:"100%", display:"grid", gridTemplateRows:"auto 1fr auto", padding:"18px", gap:"14px" }}>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-          <div style={{ fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".32em", color:"var(--green)", animation:"vsFlash 1.5s ease-in-out infinite" }}>MATCH READY</div>
-          <button onClick={onChangeFormation} style={{ padding:"7px 11px", borderRadius:"999px", border:"1px solid rgba(255,255,255,.12)", background:"rgba(255,255,255,.05)", color:"var(--tx2)", fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".12em" }}>CHANGE SHAPE</button>
-        </div>
+      <ScreenBackButton onClick={onBack} />
 
-        <div style={{ display:"grid", gridTemplateColumns:"minmax(0,1fr) auto minmax(0,1fr)", gap:"14px", alignItems:"center", maxWidth:"940px", width:"100%", margin:"0 auto", minHeight:0 }}>
-          {[{ name:S.clubName || "ZAP", rep:S.rep, init:myInit, col:"var(--green)", label:"YOUR CLUB" }, { name:opponentName, rep:opponentRep, init:oppInit, col:oppCol, label:"OPPOSITION" }].map((club, i) => (
-            <div key={club.label} style={{ gridColumn:i===0 ? "1" : "3", borderRadius:"18px", border:`1px solid ${club.col}44`, background:"linear-gradient(180deg,rgba(8,18,13,.88),rgba(3,8,5,.95))", boxShadow:"0 24px 70px rgba(0,0,0,.38)", overflow:"hidden", animation:`splashFade .45s ${i*.1}s ease both` }}>
-              <div style={{ padding:"10px 14px", display:"flex", justifyContent:"space-between", borderBottom:"1px solid rgba(255,255,255,.08)" }}>
-                <span style={{ fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".2em", color:club.col }}>{club.label}</span>
-                <span style={{ fontFamily:"var(--f-mono)", fontSize:"7px", color:"var(--tx3)" }}>REP {club.rep}</span>
+      <div style={{ position:"relative", zIndex:2, height:"100%", display:"grid", alignItems:"center", padding:"clamp(82px,8vw,110px) clamp(44px,7vw,110px) clamp(38px,6vw,70px)" }}>
+        <div style={{ display:"grid", gridTemplateColumns:"minmax(210px,245px) minmax(170px,300px) minmax(210px,245px)", gap:"clamp(54px,10vw,150px)", alignItems:"center", justifyContent:"center" }}>
+          {[
+            { name:myClubName, init:myInit, crest:crestSrc(myClubName), col:"#74ff49", wins:myWins, draws:myDraws, losses:myLosses, acc:"70%" },
+            { name:opponentName, init:oppInit, crest:crestSrc(opponentName), col:"#ff7b43", wins:oppWins, draws:oppDraws, losses:oppLosses, acc:"60%" },
+          ].map((club, index) => (
+            <div key={club.name} style={{ gridColumn:index === 0 ? "1" : "3", gridRow:"1", display:"grid", gap:"12px", animation:`splashFade .45s ${index*.1}s ease both` }}>
+              <div style={{ height:"clamp(270px,42vh,318px)", borderRadius:"6px", padding:"clamp(16px,2vw,24px)", background:"rgba(233,255,225,.065)", border:"1px solid rgba(255,255,255,.04)", boxShadow:"inset 0 1px 0 rgba(255,255,255,.05),0 24px 70px rgba(0,0,0,.18)", backdropFilter:"blur(2px)", display:"grid", gridTemplateRows:"auto 1fr auto", overflow:"hidden" }}>
+                <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(21px,2.1vw,29px)", fontWeight:700, lineHeight:1, textAlign:"center", textTransform:"uppercase", background:`linear-gradient(90deg,#f5ffd9 0%,${club.col} 48%,#ffffff 100%)`, WebkitBackgroundClip:"text", backgroundClip:"text", color:"transparent" }}>
+                  {club.name}
+                </div>
+
+                <div style={{ display:"grid", placeItems:"center", minHeight:0 }}>
+                  {club.crest ? (
+                    <img src={club.crest} alt="" draggable={false} style={{ width:"min(78%,178px)", height:"min(78%,178px)", objectFit:"contain", filter:"drop-shadow(0 22px 34px rgba(0,0,0,.45))" }} />
+                  ) : (
+                    <div style={{ width:"min(66%,136px)", aspectRatio:"1", borderRadius:"14px", display:"grid", placeItems:"center", background:"rgba(6,18,10,.62)", border:`1px solid ${club.col}66`, color:"#fff", fontFamily:"var(--f-disp)", fontSize:"clamp(34px,3.6vw,50px)", filter:"drop-shadow(0 22px 34px rgba(0,0,0,.45))" }}>{club.init}</div>
+                  )}
+                </div>
+
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:"16px", color:"#fff", textAlign:"center" }}>
+                  {[
+                    ["WIN", club.wins],
+                    ["DRAW", club.draws],
+                    ["LOSS", club.losses],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(17px,1.55vw,22px)", fontWeight:900, lineHeight:1 }}>{value}</div>
+                      <div style={{ marginTop:"7px", fontFamily:"var(--f-body)", fontSize:"clamp(12px,1.25vw,16px)", fontWeight:400, lineHeight:1 }}>{label}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div style={{ padding:"20px", display:"flex", alignItems:"center", gap:"14px" }}>
-                <div style={{ width:"68px", height:"68px", borderRadius:"18px", background:`radial-gradient(circle,${club.col}3a,rgba(255,255,255,.04))`, border:`1px solid ${club.col}66`, display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"var(--f-disp)", fontSize:"20px", color:club.col, letterSpacing:"1px" }}>{club.init}</div>
-                <div style={{ minWidth:0 }}>
-                  <div style={{ fontFamily:"var(--f-disp)", fontSize:"34px", letterSpacing:"1px", color:"var(--tx)", lineHeight:.95, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{club.name}</div>
-                  <div style={{ marginTop:"8px", height:"5px", width:"160px", maxWidth:"100%", background:"rgba(255,255,255,.08)", borderRadius:"999px", overflow:"hidden" }}>
-                    <div style={{ height:"100%", width:Math.max(8, Math.min(100, club.rep / 2))+"%", background:club.col, borderRadius:"999px" }}/>
-                  </div>
+
+              <div style={{ minHeight:"clamp(64px,8vw,76px)", borderRadius:"6px", background:"rgba(233,255,225,.065)", border:"1px solid rgba(255,255,255,.04)", display:"grid", placeItems:"center", textAlign:"center", color:"#fff", backdropFilter:"blur(2px)" }}>
+                <div>
+                  <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(12px,1.4vw,17px)", fontWeight:400, lineHeight:1, marginBottom:"8px" }}>READ ACCURACY</div>
+                  <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(18px,2vw,25px)", fontWeight:900, lineHeight:1 }}>{club.acc}</div>
                 </div>
               </div>
             </div>
           ))}
-          <div style={{ gridColumn:"2", gridRow:"1", width:"72px", height:"72px", borderRadius:"50%", border:"1px solid rgba(255,255,255,.1)", background:"rgba(3,8,5,.82)", display:"flex", alignItems:"center", justifyContent:"center", fontFamily:"var(--f-disp)", fontSize:"32px", color:"var(--gold)", boxShadow:"0 20px 56px rgba(0,0,0,.4)" }}>VS</div>
-        </div>
 
-        <div style={{ width:"min(700px,100%)", margin:"0 auto", display:"grid", gridTemplateColumns:"1fr auto 1fr", gap:"10px", alignItems:"stretch" }}>
-          <div style={{ padding:"12px", borderRadius:"14px", background:"rgba(74,222,128,.08)", border:"1px solid rgba(74,222,128,.2)", textAlign:"center" }}>
-            <div style={{ fontFamily:"var(--f-disp)", fontSize:"34px", color:"#4ade80", lineHeight:1 }}>+{winRep}</div>
-            <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", color:"rgba(74,222,128,.65)", letterSpacing:".16em" }}>WIN REP</div>
-          </div>
-          <button onClick={() => onKickOff({ name:opponentName, rep:opponentRep })} style={{ minWidth:"190px", padding:"0 24px", borderRadius:"14px", background:"var(--green)", color:"var(--bg)", fontFamily:"var(--f-disp)", fontSize:"24px", letterSpacing:"3px", boxShadow:"0 0 30px rgba(24,193,88,.34)" }}>
-            KICK OFF
-            <span style={{ display:"block", marginTop:"3px", fontFamily:"var(--f-mono)", fontSize:"7px", letterSpacing:".14em", opacity:.62 }}>
-              {repGap > 0 ? `+${repGap} REP GAP` : repGap < 0 ? `${repGap} REP GAP` : "EVEN REP"}
-            </span>
-          </button>
-          <div style={{ padding:"12px", borderRadius:"14px", background:"rgba(248,113,113,.08)", border:"1px solid rgba(248,113,113,.2)", textAlign:"center" }}>
-            <div style={{ fontFamily:"var(--f-disp)", fontSize:"34px", color:"#f87171", lineHeight:1 }}>-{lossRep}</div>
-            <div style={{ fontFamily:"var(--f-mono)", fontSize:"7px", color:"rgba(248,113,113,.65)", letterSpacing:".16em" }}>LOSS REP</div>
+          <div style={{ gridColumn:"2", gridRow:"1", display:"grid", placeItems:"center", alignSelf:"center" }}>
+            <div style={{ display:"grid", gap:"12px", justifyItems:"center", width:"min(100%,210px)" }}>
+              <div style={{ display:"grid", gridTemplateColumns:"44px 1fr 44px", gap:"8px", alignItems:"center", width:"100%" }}>
+                <button onClick={() => moveOpponent(-1)} aria-label="Previous opponent" style={{ height:"44px", borderRadius:"8px", background:"rgba(255,255,255,.08)", color:"#fff", border:"1px solid rgba(255,255,255,.1)", fontSize:"22px" }}>‹</button>
+                <div style={{ minWidth:0, textAlign:"center", fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".12em", color:"rgba(255,255,255,.64)" }}>{opponentIndex + 1}/{opponents.length}</div>
+                <button onClick={() => moveOpponent(1)} aria-label="Next opponent" style={{ height:"44px", borderRadius:"8px", background:"rgba(255,255,255,.08)", color:"#fff", border:"1px solid rgba(255,255,255,.1)", fontSize:"22px" }}>›</button>
+              </div>
+              <div style={{ display:"flex", gap:"8px", flexWrap:"wrap", justifyContent:"center" }}>
+                <span style={{ padding:"7px 9px", borderRadius:"999px", background:"rgba(255,255,255,.09)", color:"#fff", fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".12em" }}>{opponent.difficulty.toUpperCase()}</span>
+                <span style={{ padding:"7px 9px", borderRadius:"999px", background:"rgba(116,220,69,.13)", color:"#bafc8a", fontFamily:"var(--f-mono)", fontSize:"8px", letterSpacing:".12em" }}>{opponent.rarity}</span>
+              </div>
+              <button onClick={() => setFormationOpen(true)} style={{ width:"100%", minHeight:"44px", borderRadius:"7px", background:"rgba(255,255,255,.075)", color:"#fff", border:"1px solid rgba(255,255,255,.12)", fontFamily:"var(--f-body)", fontSize:"14px", fontWeight:600 }}>
+                Formation · {activeFormation.shape}
+              </button>
+              <button disabled={formationLocked} onClick={() => onKickOff({ name:opponentName, rep:opponentRep, difficulty:opponent.difficulty })} style={{ width:"min(100%,176px)", height:"clamp(42px,5vw,56px)", borderRadius:"7px", background:formationLocked?"rgba(255,255,255,.12)":"linear-gradient(135deg,#bafc8a,#74dc45)", color:formationLocked?"rgba(255,255,255,.44)":"#061008", border:"1px solid rgba(255,255,255,.18)", fontFamily:"var(--f-body)", fontSize:"clamp(16px,1.55vw,22px)", fontWeight:700, display:"inline-flex", alignItems:"center", justifyContent:"center", gap:"10px", boxShadow:formationLocked?"none":"0 18px 42px rgba(0,0,0,.28),0 0 30px rgba(116,220,69,.24)" }}>
+                KICK OFF
+                <img src={WHISTLE_ICON} alt="" draggable={false} onError={(e) => { e.currentTarget.style.display = "none"; }} style={{ width:"clamp(22px,2.4vw,30px)", height:"clamp(22px,2.4vw,30px)", objectFit:"contain" }} />
+              </button>
+            </div>
           </div>
         </div>
       </div>
+      {formationOpen && (
+        <div className="zap-modal-backdrop">
+          <div className="formation-quick-modal">
+            <button className="formation-quick-modal__close" onClick={() => setFormationOpen(false)} aria-label="Close">×</button>
+            <div className="formation-quick-modal__eyebrow">MATCH SHAPE</div>
+            <h2>Pick your setup</h2>
+            <div className="formation-quick-modal__list">
+              {FORMATIONS.map((f) => {
+                const locked = (S?.rep || 0) < (f.minRep || 0);
+                const active = f.id === activeFormationId;
+                const needed = Math.max(0, (f.minRep || 0) - (S?.rep || 0));
+                return (
+                  <button
+                    key={f.id}
+                    disabled={locked}
+                    className={active ? "is-active" : ""}
+                    onClick={() => {
+                      onSelectFormation?.(f.id);
+                      setFormationOpen(false);
+                    }}
+                  >
+                    <strong>{f.shape}</strong>
+                    <span>{f.name}{locked ? ` · ${needed} ZAP NEEDED` : ""}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
