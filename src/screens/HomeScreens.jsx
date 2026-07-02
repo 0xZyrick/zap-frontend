@@ -14,6 +14,7 @@ const MEDAL_ICON = "/assets/icons/medal.png";
 const RANK_ICON = "/assets/icons/rank.png";
 const LEADERBOARD_CARD_IMAGE = "/assets/announcements/leaderboard-bg.png";
 const TOURNAMENT_CARD_IMAGE = "/assets/announcements/tournament-bg.png";
+const CREST_GENERATION_BG = "/assets/bg/crest-generation-bg.png";
 const ANNOUNCEMENT_CANDIDATES = [
   ...Array.from({ length: 5 }, (_, i) => `/assets/announcements/announcement-${String(i + 1).padStart(2, "0")}.png`),
 ];
@@ -705,7 +706,7 @@ export function ShopScreen({ S, onPlay, onMissions, onTeam, onRequestCrest }) {
     <HomeStadiumBackdrop>
       <main className="missions-screen">
         <ClubhouseHeader S={S} active="shop" onPlay={onPlay} onMissions={onMissions} onShop={() => {}} onTeam={onTeam} />
-        <section className="shop-screen__panel">
+        <section className="shop-screen__panel" style={{ "--crest-generation-bg": `url("${CREST_GENERATION_BG}")` }}>
           <div>
             <span>CREST REQUEST</span>
             <h2>Your club. Your crest. Onchain forever.</h2>

@@ -36,6 +36,7 @@ const CRITICAL_ASSETS = [
   "/assets/bg/card-texture.png",
   "/assets/bg/loading-bg.png",
   "/assets/bg/mode-texture.png",
+  "/assets/bg/crest-generation-bg.png",
   "/assets/players/loading-anime.png",
   "/assets/players/anime-home.png",
   "/assets/players/anime-kickoff.png",
