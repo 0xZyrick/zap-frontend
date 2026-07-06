@@ -30,6 +30,9 @@ const BOOT_LOADING_MS = 13000;
 const PLAYER_LOADING = "/assets/players/loading-anime.png";
 const LOADING_BG = "/assets/bg/loading-bg.png";
 const ZAP_LOGO = "/assets/logo/zap-logo.png";
+const ZAP_DOCS_URL = import.meta.env.VITE_ZAP_DOCS_URL || "https://playzap.vercel.app/docs";
+const ZAP_X_URL = import.meta.env.VITE_ZAP_X_URL || "https://x.com/playzap";
+const ZAP_TELEGRAM_URL = import.meta.env.VITE_ZAP_TELEGRAM_URL || "https://t.me/playzap";
 const CRITICAL_ASSETS = [
   "/assets/bg/spilt-bg.png",
   "/assets/bg/home-bg.png",
@@ -59,6 +62,39 @@ const loadProfile = (wallet) => {
   } catch (_) {}
   return { s, lb };
 };
+
+function SplashSocialIcon({ type }) {
+  const common = {
+    fill:"none",
+    stroke:"currentColor",
+    strokeWidth:"2",
+    strokeLinecap:"round",
+    strokeLinejoin:"round",
+  };
+  if (type === "x") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path {...common} d="M4 4l16 16" />
+        <path {...common} d="M20 4L4 20" />
+      </svg>
+    );
+  }
+  if (type === "telegram") {
+    return (
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M20.6 4.4c.5-.2.9.2.8.8l-3.1 14.6c-.1.6-.7.8-1.2.5l-4.6-3.4-2.2 2.1c-.2.2-.4.4-.8.4l.3-4.7 8.6-7.8c.4-.3-.1-.5-.6-.2L7.2 13.4 2.6 12c-.6-.2-.6-.8.1-1.1l17.9-6.5z" />
+      </svg>
+    );
+  }
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path {...common} d="M6 2h8l4 4v16H6z" />
+      <path {...common} d="M14 2v5h5" />
+      <path {...common} d="M9 12h6" />
+      <path {...common} d="M9 16h6" />
+    </svg>
+  );
+}
 
 // ── Loading screen ─────────────────────────────────────────────────────────────
 function LoadingScreen({ label = "LOADING CLUBHOUSE", ready = false, entering = false, onEnter, onGuest }) {
@@ -133,7 +169,28 @@ function LoadingScreen({ label = "LOADING CLUBHOUSE", ready = false, entering = 
           </div>
         )}
       </div>
-      <div className="zap-splash__fineprint">SEASON 1 ACCESS</div>
+      <div className="zap-splash__corner">
+        <div className="zap-splash__socials" aria-label="ZAP links">
+          {[
+            { label:"Game document", href:ZAP_DOCS_URL, type:"docs" },
+            { label:"ZAP on X", href:ZAP_X_URL, type:"x" },
+            { label:"ZAP on Telegram", href:ZAP_TELEGRAM_URL, type:"telegram" },
+          ].map((link) => (
+            <a
+              key={link.type}
+              className="zap-splash__social"
+              href={link.href}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={link.label}
+              title={link.label}
+            >
+              <SplashSocialIcon type={link.type} />
+            </a>
+          ))}
+        </div>
+        <div className="zap-splash__fineprint">SEASON 1 ACCESS</div>
+      </div>
     </div>
   );
 }

@@ -228,6 +228,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const setupStartedRef = useRef(false);
   const halftimeContinueRef = useRef(false);
   const postMatchNextRef = useRef(null);
+  const chainRewardClaimedRef = useRef(false);
   const extraTimeRef = useRef(false);
 
   // ── Derived formation info ───────────────────────────────────────────────
@@ -800,15 +801,6 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setLB(newLB);
     saveLB?.(newLB, ns.wallet);
 
-    // Mark game as finished on blockchain
-    if (dojo && account) {
-      try {
-        await dojo.doClaimReward();
-      } catch {
-        // Non-blocking: local rewards screen still reflects the completed match.
-      }
-    }
-
     const tca = turnCountRef.current;
     playSound("halftimeWhistle", { volume:0.24 });
     playSound("matchEnd", { volume:0.24 });
@@ -847,13 +839,25 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     next?.();
   };
 
-  const claimReward = () => {
+  const claimOnchainMatchReward = useCallback(async () => {
+    if (chainRewardClaimedRef.current || !dojo?.sessionId || !account) return;
+    try {
+      await dojo.doClaimReward();
+      chainRewardClaimedRef.current = true;
+    } catch {
+      showToast?.("On-chain match reward could not be claimed yet.");
+    }
+  }, [account, dojo, showToast]);
+
+  const claimReward = async () => {
     if (!rewardOvl?.key) {
+      await claimOnchainMatchReward();
       setRewardOvl(null);
       continuePostMatch();
       return;
     }
 
+    await claimOnchainMatchReward();
     const reward = REWARDS[rewardOvl.key] || {};
     const claimedState = {
       ...rewardOvl.state,
@@ -882,12 +886,13 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     continuePostMatch();
   };
 
-  const startPostMatchFlow = (next) => {
+  const startPostMatchFlow = async (next) => {
     postMatchNextRef.current = next;
     if (ftOvl?.rewardKey) {
       setRewardOvl({ key:ftOvl.rewardKey, state:ftOvl.nextState || S, rank:ftOvl.newRank });
       return;
     }
+    await claimOnchainMatchReward();
     if (ftOvl?.tierChange?.dir === "up") {
       setTierOvl(ftOvl.tierChange);
       return;
@@ -914,6 +919,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setPauseOpen(false);
     extraTimeRef.current = false;
     setupStartedRef.current = false;
+    chainRewardClaimedRef.current = false;
     setPreMatchStage("loading");
     setSetupProgress(6);
 

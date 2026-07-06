@@ -265,14 +265,13 @@ export function TierChangeModal({ data, onClose }) {
 export function RewardModal({ cfg, onClaim, onSkip }) {
   const amountValue = Number(cfg?.coins || cfg?.rep || 0);
   const amount = amountValue.toLocaleString();
-  const amountLabel = cfg?.coins ? "ZAP" : "RANKING";
   const rank = cfg?.rank || cfg?.ranking || "4TH";
   const crest = cfg?.badgeImage || cfg?.crest || "/assets/crests/codmai.png";
   const title = cfg?.title || "REWARD UNLOCKED";
   const sub = cfg?.sub || "Claim your bonus";
   return (
     <div style={{ position:"absolute", inset:0, zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", padding:"clamp(18px,4vw,54px)", background:"rgba(0,0,0,.58)", backdropFilter:"blur(5px)", animation:"flashIn .2s ease" }}>
-      <div style={{ width:"min(40vw, 560px)", minWidth:"min(320px, calc(100vw - 36px))", height:"min(40vh, 390px)", minHeight:"300px", borderRadius:"18px", position:"relative", overflow:"hidden", background:"linear-gradient(180deg,#087d26 0%,#078526 58%,#128d34 58%,#0b7625 100%)", boxShadow:"0 24px 70px rgba(0,0,0,.42)", display:"grid", gridTemplateRows:"1fr auto", padding:"clamp(22px,3vw,38px)" }}>
+      <div style={{ width:"min(44vw, 580px)", minWidth:"min(320px, calc(100vw - 36px))", height:"clamp(370px,48vh,460px)", maxHeight:"calc(100vh - 36px)", borderRadius:"18px", position:"relative", overflow:"hidden", background:"linear-gradient(180deg,#087d26 0%,#078526 58%,#128d34 58%,#0b7625 100%)", boxShadow:"0 24px 70px rgba(0,0,0,.42)", display:"grid", gridTemplateRows:"minmax(0,1fr) auto", padding:"clamp(24px,3vw,40px)", gap:"clamp(16px,2vh,24px)" }}>
         <div style={{ position:"absolute", inset:0, opacity:.3, background:"linear-gradient(90deg,transparent 0 15%,rgba(255,255,255,.15) 15% 35%,transparent 35% 68%,rgba(255,255,255,.13) 68% 100%),linear-gradient(180deg,transparent 0 78%,rgba(255,255,255,.08) 78% 100%)" }}/>
         <div style={{ position:"relative", zIndex:1, display:"grid", placeItems:"center", alignContent:"center", textAlign:"center" }}>
           <div style={{ width:"clamp(58px,6vw,86px)", height:"clamp(58px,6vw,86px)", borderRadius:"18px", display:"grid", placeItems:"center", background:"rgba(2,10,6,.36)", border:"1px solid rgba(255,255,255,.16)", boxShadow:"0 12px 24px rgba(0,0,0,.24),0 0 24px rgba(250,204,21,.16)", marginBottom:"clamp(14px,2vw,22px)" }}>
@@ -288,9 +287,11 @@ export function RewardModal({ cfg, onClaim, onSkip }) {
             <span>+{amount}</span>
             {cfg?.coins && <img src={COIN_ICON} alt="" draggable={false} style={{ width:"clamp(28px,3.6vw,44px)", height:"clamp(28px,3.6vw,44px)", objectFit:"contain", filter:"drop-shadow(0 8px 14px rgba(0,0,0,.3))" }} />}
           </div>
-          <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(14px,1.5vw,20px)", fontWeight:900, color:"#fff", lineHeight:1, textTransform:"uppercase" }}>
-            {cfg?.coins ? amountLabel : `RANKING ${rank}`}
-          </div>
+          {!cfg?.coins && (
+            <div style={{ fontFamily:"var(--f-body)", fontSize:"clamp(14px,1.5vw,20px)", fontWeight:900, color:"#fff", lineHeight:1, textTransform:"uppercase" }}>
+              RANKING {rank}
+            </div>
+          )}
         </div>
         <button onClick={onClaim || onSkip} style={{ position:"relative", zIndex:1, width:"100%", minHeight:"clamp(44px,5vh,56px)", borderRadius:"12px", background:"#fff", color:"#031007", fontFamily:"var(--f-body)", fontSize:"clamp(15px,1.5vw,20px)", fontWeight:900, border:0 }}>
           OK
