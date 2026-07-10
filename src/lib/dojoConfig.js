@@ -2,11 +2,20 @@ import manifestDev from "./manifest_dev.json";
 import manifestSepolia from "./manifest_sepolia.json";
 
 const env = import.meta.env || {};
-const CHAIN_PROFILE = (env.VITE_CHAIN_PROFILE || env.VITE_CHAIN || "katana").toLowerCase();
+const rawRpcUrl = env.VITE_STARKNET_RPC_URL || "";
+const rawToriiUrl = env.VITE_TORII_URL || "";
+const deprecatedZapKatana =
+  rawRpcUrl.includes("/x/zapfc/katana") ||
+  rawToriiUrl.includes("/x/zapfc/torii");
+const CHAIN_PROFILE = (deprecatedZapKatana
+  ? "sepolia"
+  : env.VITE_CHAIN_PROFILE || env.VITE_CHAIN || "sepolia").toLowerCase();
 const DEFAULT_PROFILE = CHAIN_PROFILE === "sepolia" || CHAIN_PROFILE === "starknet-sepolia"
   ? "sepolia"
   : "katana";
-const PROFILE = (env.VITE_DOJO_PROFILE || env.VITE_NETWORK || DEFAULT_PROFILE).toLowerCase();
+const PROFILE = (deprecatedZapKatana
+  ? "sepolia"
+  : env.VITE_DOJO_PROFILE || env.VITE_NETWORK || DEFAULT_PROFILE).toLowerCase();
 const manifests = {
   dev: manifestDev,
   local: manifestDev,
@@ -38,15 +47,15 @@ export const KATANA_CHAIN_ID = env.VITE_KATANA_CHAIN_ID || "0x57505f5a41504643";
 export const SEPOLIA_CHAIN_ID = "0x534e5f5345504f4c4941";
 export const CHAIN_ID = isSepolia ? SEPOLIA_CHAIN_ID : KATANA_CHAIN_ID;
 
-export const RPC_URL = env.VITE_STARKNET_RPC_URL || (
+export const RPC_URL = deprecatedZapKatana ? "https://api.cartridge.gg/x/starknet/sepolia" : env.VITE_STARKNET_RPC_URL || (
   isSepolia
     ? "https://api.cartridge.gg/x/starknet/sepolia"
-    : "https://api.cartridge.gg/x/zapfc/katana"
+    : "http://localhost:5050"
 );
-export const TORII_URL = env.VITE_TORII_URL || (
+export const TORII_URL = deprecatedZapKatana ? "https://api.cartridge.gg/x/starknet/sepolia/torii" : env.VITE_TORII_URL || (
   isSepolia
     ? "https://api.cartridge.gg/x/starknet/sepolia/torii"
-    : "https://api.cartridge.gg/x/zapfc/torii"
+    : "http://localhost:8080"
 );
 export const USE_CARTRIDGE = env.VITE_USE_CARTRIDGE
   ? env.VITE_USE_CARTRIDGE === "true"

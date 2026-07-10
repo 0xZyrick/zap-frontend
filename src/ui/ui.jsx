@@ -689,10 +689,43 @@ export function PitchCueBadges({ context, previewIntentId, gs, showBadges = fals
 // ─── ScoreBar ─────────────────────────────────────────────────────────────────
 export function ScoreBar({ homeClub, awayClub = "RIVALS FC", score, matchTime, gs, isSecondHalf, formationShape, popH, popA }) {
   const zm = ZONE[gs] || ZONE.MIDFIELD;
-  const homeShort = (homeClub || "ZAP").split(" ").map(w => w[0]).join("").slice(0, 3).toUpperCase();
-  const awayShort = (awayClub || "RIVALS").split(" ").map(w => w[0]).join("").slice(0, 3).toUpperCase();
+  const homeShort = clubInitials(homeClub || "ZAP").slice(0, 3);
+  const awayShort = clubInitials(awayClub || "RIVALS").slice(0, 3);
   const homeName  = (homeClub || "ZAP").replace(/ FC$/i, "");
   const awayName  = (awayClub || "RIVALS").replace(/ FC$/i, "");
+  const homeCrest = crestSrc(homeClub);
+  const awayCrest = crestSrc(awayClub);
+
+  const badge = ({ crest, initials, home = false }) => (
+    <div style={{
+      width:"34px", height:"34px", borderRadius:"9px", flexShrink:0,
+      background:home ? "linear-gradient(135deg,#18c158,#0a6e30)" : "linear-gradient(135deg,#c0392b,#7b0e07)",
+      display:"flex", alignItems:"center", justifyContent:"center",
+      fontFamily:"var(--f-disp)", fontSize:"11px", color:"#fff", fontWeight:900,
+      boxShadow:home ? "0 0 14px rgba(24,193,88,.36)" : "none",
+      border:home ? "1px solid rgba(24,193,88,.4)" : "1px solid rgba(248,113,113,.35)",
+      overflow:"hidden",
+      position:"relative",
+    }}>
+      <span style={{ position:"absolute", inset:0, display:"grid", placeItems:"center" }}>{initials}</span>
+      {crest && (
+        <img
+          src={crest}
+          alt=""
+          draggable={false}
+          onError={(e) => { e.currentTarget.style.display = "none"; }}
+          style={{
+            position:"absolute",
+            inset:"4px",
+            width:"calc(100% - 8px)",
+            height:"calc(100% - 8px)",
+            objectFit:"contain",
+            filter:"drop-shadow(0 5px 7px rgba(0,0,0,.32))",
+          }}
+        />
+      )}
+    </div>
+  );
 
   return (
     <div style={{
@@ -717,15 +750,7 @@ export function ScoreBar({ homeClub, awayClub = "RIVALS FC", score, matchTime, g
         display:"flex", alignItems:"center", gap:"10px",
         padding:"0 16px", flex:1, minWidth:0,
       }}>
-        {/* Badge */}
-        <div style={{
-          width:"34px", height:"34px", borderRadius:"9px", flexShrink:0,
-          background:"linear-gradient(135deg,#18c158,#0a6e30)",
-          display:"flex", alignItems:"center", justifyContent:"center",
-          fontFamily:"var(--f-disp)", fontSize:"11px", color:"#fff", fontWeight:900,
-          boxShadow:"0 0 14px rgba(24,193,88,.36)",
-          border:"1px solid rgba(24,193,88,.4)",
-        }}>{homeShort}</div>
+        {badge({ crest:homeCrest, initials:homeShort, home:true })}
         <div style={{ minWidth:0 }}>
           <div style={{
             fontFamily:"var(--f-disp)", fontSize:"15px", letterSpacing:"1.5px",
@@ -779,14 +804,7 @@ export function ScoreBar({ homeClub, awayClub = "RIVALS FC", score, matchTime, g
             color:"rgba(255,255,255,.25)", marginTop:"2px",
           }}>{ZONE[gs]?.lbl || gs}</div>
         </div>
-        {/* Away badge */}
-        <div style={{
-          width:"34px", height:"34px", borderRadius:"9px", flexShrink:0,
-          background:"linear-gradient(135deg,#c0392b,#7b0e07)",
-          display:"flex", alignItems:"center", justifyContent:"center",
-          fontFamily:"var(--f-disp)", fontSize:"11px", color:"#fff", fontWeight:900,
-          border:"1px solid rgba(248,113,113,.35)",
-        }}>{awayShort}</div>
+        {badge({ crest:awayCrest, initials:awayShort })}
       </div>
 
       {/* Live indicator dot */}
@@ -1020,7 +1038,7 @@ export function ResolutionScreen({
   context,
   homeClub = "ZAP FC",
   awayClub = "RIVALS FC",
-  score = null,
+  score: _score = null,
 }) {
   if (playerAction == null) return null;
 

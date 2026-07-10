@@ -41,6 +41,11 @@ const SHOW_CUE_TOGGLE = false;
 const SHOW_RESULT_FLASH = false;
 const SHOW_GUIDED_CUES = false;
 const EMPTY_MATCH_STATS = { shots_h:0, shots_a:0, saves_h:0, saves_a:0, attacks_h:0, attacks_a:0 };
+const NEUTRAL_CAMERA = {
+  transform: "translate(0%, 0%) scale(1)",
+  transformOrigin: "50% 50%",
+  transition: "transform 0.72s cubic-bezier(0.22,1,0.36,1)",
+};
 const distSq = (a, b) => ((a?.x ?? 0) - (b?.x ?? 0)) ** 2 + ((a?.y ?? 0) - (b?.y ?? 0)) ** 2;
 
 function getTurnContextLine({ score, gs, matchTime, momentum, midfieldSide }) {
@@ -65,7 +70,226 @@ function pickDefendIndexFromLoss(direction, fallbackIndex) {
   return fallbackIndex;
 }
 
-function buildMomentCamera(context, gs) {
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+function useTweenPoint(target, duration = 620) {
+  const targetX = target.x;
+  const targetY = target.y;
+  const [point, setPoint] = useState(target);
+  const pointRef = useRef(target);
+  const rafRef = useRef(null);
+
+  useEffect(() => {
+    const from = pointRef.current || { x: targetX, y: targetY };
+    const to = { x: targetX, y: targetY };
+    const startedAt = performance.now();
+    cancelAnimationFrame(rafRef.current);
+
+    const tick = (now) => {
+      const t = easeOutCubic(clamp01((now - startedAt) / Math.max(1, duration)));
+      const next = {
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+      };
+      pointRef.current = next;
+      setPoint(next);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [targetX, targetY, duration]);
+
+  return point;
+}
+
+function pushPoint(point, dx, dy) {
+  return {
+    x: clamp((point?.x ?? 50) + dx, 4, 96),
+    y: clamp((point?.y ?? 50) + dy, 7, 93),
+  };
+}
+
+const CONSEQUENCE_CLIPS = {
+  cleanBreakForward: {
+    id: "cleanBreakForward",
+    duration: 1450,
+    fadeCardsAt: 1020,
+    cameraScale: 1.18,
+    waypoints: {
+      carrier: [{ t: 0.65, pose: "run", dx: 10, dy: 0 }],
+      target: [{ t: 0.85, pose: "run", dx: 5, dy: 0 }],
+      marker: [{ t: 0.7, pose: "defend", dx: -4, dy: 6 }],
+      ball: [{ t: 0.9, to: "target" }],
+    },
+  },
+  wideRelease: {
+    id: "wideRelease",
+    duration: 1500,
+    fadeCardsAt: 1080,
+    cameraScale: 1.2,
+    waypoints: {
+      carrier: [{ t: 0.55, pose: "run", dx: 6, dy: 0 }],
+      target: [{ t: 0.85, pose: "run", dx: 8, dy: 8 }],
+      marker: [{ t: 0.75, pose: "defend", dx: -3, dy: -8 }],
+      ball: [{ t: 0.88, to: "target" }],
+    },
+  },
+  markerCutsOut: {
+    id: "markerCutsOut",
+    duration: 1400,
+    fadeCardsAt: 980,
+    cameraScale: 1.22,
+    waypoints: {
+      carrier: [{ t: 0.6, pose: "defend", dx: -5, dy: 3 }],
+      marker: [{ t: 0.74, pose: "run", dx: 4, dy: 0 }],
+      support: [{ t: 0.65, pose: "idle", dx: -4, dy: -4 }],
+      ball: [{ t: 0.78, to: "marker" }],
+    },
+  },
+  looseBallCollision: {
+    id: "looseBallCollision",
+    duration: 1550,
+    fadeCardsAt: 1120,
+    cameraScale: 1.25,
+    waypoints: {
+      carrier: [{ t: 0.55, pose: "defend", dx: -3, dy: 4 }],
+      marker: [{ t: 0.55, pose: "defend", dx: 3, dy: -4 }],
+      support: [{ t: 0.8, pose: "run", dx: 5, dy: 5 }],
+      ball: [{ t: 0.68, to: "loose" }],
+    },
+  },
+  goalkeeperDiveGoal: {
+    id: "goalkeeperDiveGoal",
+    duration: 1650,
+    fadeCardsAt: 1200,
+    cameraScale: 1.3,
+    waypoints: {
+      carrier: [{ t: 0.65, pose: "run", dx: 5, dy: 0 }],
+      keeper: [{ t: 0.72, pose: "gk-dive", dx: -3, dy: 8 }],
+      ball: [{ t: 0.82, to: "goal" }],
+    },
+  },
+  goalkeeperSave: {
+    id: "goalkeeperSave",
+    duration: 1600,
+    fadeCardsAt: 1120,
+    cameraScale: 1.28,
+    waypoints: {
+      carrier: [{ t: 0.55, pose: "run", dx: 4, dy: 0 }],
+      keeper: [{ t: 0.72, pose: "gk-dive", dx: -5, dy: -7 }],
+      ball: [{ t: 0.72, to: "keeper" }],
+    },
+  },
+  defensiveMirror: {
+    id: "defensiveMirror",
+    duration: 1450,
+    fadeCardsAt: 1040,
+    cameraScale: 1.18,
+    waypoints: {
+      carrier: [{ t: 0.62, pose: "defend", dx: 4, dy: 0 }],
+      marker: [{ t: 0.62, pose: "run", dx: -5, dy: 0 }],
+      ball: [{ t: 0.86, to: "carrier" }],
+    },
+  },
+};
+
+function pickConsequenceClip(turnResult, gs) {
+  if (turnResult?.goalScored) return CONSEQUENCE_CLIPS.goalkeeperDiveGoal;
+  if (gs === "ATTACK" && !turnResult?.ok) return CONSEQUENCE_CLIPS.goalkeeperSave;
+  if (turnResult?.ok && turnResult?.gainDirection && turnResult.gainDirection !== "central") return CONSEQUENCE_CLIPS.wideRelease;
+  if (turnResult?.ok) return CONSEQUENCE_CLIPS.cleanBreakForward;
+  if (turnResult?.lossDirection === "central") return CONSEQUENCE_CLIPS.looseBallCollision;
+  if (gs === "DEFEND") return CONSEQUENCE_CLIPS.defensiveMirror;
+  return CONSEQUENCE_CLIPS.markerCutsOut;
+}
+
+function applyWaypoint(player, waypoint, forward, laneShift, duration) {
+  if (!player || !waypoint) return player;
+  return {
+    ...player,
+    ...pushPoint(player, (waypoint.dx || 0) * forward, (waypoint.dy || 0) * laneShift),
+    pose: waypoint.pose || player.pose,
+    tween: { duration: Math.max(1, duration * (waypoint.t || 1)) },
+  };
+}
+
+function buildConsequenceScene(context, turnResult, clip) {
+  if (!context?.players?.length || !turnResult || !clip) {
+    return { context, ball: context?.ball || { x:50, y:50 }, camera: null };
+  }
+
+  const players = context.players || [];
+  const byId = (id) => players.find(p => p.id === id) || null;
+  const carrier = byId(context.ballCarrierId) || players.find(p => p.hB) || players[0];
+  const targetId = turnResult.movement?.ballTo || context.routes?.[0]?.to?.id || null;
+  const targetPlayer = byId(targetId) || (context.openPlayers || []).map(byId).find(Boolean) || carrier;
+  const marker = (context.pressurePlayers || []).map(byId).filter(Boolean)
+    .sort((a, b) => distSq(a, carrier) - distSq(b, carrier))[0] ||
+    players.filter(p => p.t !== carrier?.t && p.role !== "GK").sort((a, b) => distSq(a, carrier) - distSq(b, carrier))[0];
+  const support = (context.supportOptions || []).map(byId).find(Boolean);
+  const keeper = players.find(p => p.t !== carrier?.t && p.role === "GK") ||
+    players.find(p => p.role === "GK");
+  const carrierHome = carrier?.t !== "a";
+  const forward = carrierHome ? 1 : -1;
+  const target = turnResult.movement?.target || context.routes?.[0]?.to || context.ball || carrier;
+  const laneShift = target?.y > (carrier?.y ?? 50) ? 1 : -1;
+  const looseBall = pushPoint(carrier, forward * 4, laneShift * 4);
+  const goalBall = { x: carrierHome ? 94 : 6, y: clamp(target?.y || 50, 39, 61) };
+
+  const clipActors = {
+    carrier: carrier?.id,
+    target: targetPlayer?.id,
+    marker: marker?.id,
+    support: support?.id,
+    keeper: keeper?.id,
+  };
+  const finalCarrierId = turnResult.ok ? (targetPlayer?.id || carrier?.id) : (marker?.id || carrier?.id);
+
+  const shifted = players.map((p) => {
+    let role = Object.entries(clipActors).find(([, id]) => id === p.id)?.[0] || null;
+    let next = { ...p, hB: p.id === finalCarrierId };
+    if (!role) return next;
+    const waypoint = clip.waypoints?.[role]?.at(-1);
+    next = applyWaypoint(next, waypoint, forward, laneShift, clip.duration);
+    if (role === "target" && turnResult.ok) {
+      next.tags = Array.from(new Set([...(next.tags || []), "open", "active"]));
+      next.emphasis = "focus";
+    }
+    if (role === "marker" && !turnResult.ok) {
+      next.tags = Array.from(new Set([...(next.tags || []), "pressure", "active"]));
+      next.emphasis = "focus";
+    }
+    return next;
+  });
+
+  const ballWaypoint = clip.waypoints?.ball?.at(-1);
+  const ball = ballWaypoint?.to === "target" ? { x: targetPlayer?.x ?? target.x, y: targetPlayer?.y ?? target.y }
+    : ballWaypoint?.to === "marker" ? { x: marker?.x ?? looseBall.x, y: marker?.y ?? looseBall.y }
+    : ballWaypoint?.to === "keeper" ? { x: keeper?.x ?? goalBall.x, y: keeper?.y ?? goalBall.y }
+    : ballWaypoint?.to === "goal" ? goalBall
+    : ballWaypoint?.to === "carrier" ? { x: carrier?.x ?? 50, y: carrier?.y ?? 50 }
+    : looseBall;
+  const sceneContext = {
+    ...context,
+    players: shifted,
+    ballCarrierId: finalCarrierId || context.ballCarrierId,
+    ball,
+  };
+
+  return {
+    context: sceneContext,
+    ball,
+    camera: {
+      target: ball,
+      scale: clip.cameraScale,
+      duration: clip.duration,
+    },
+  };
+}
+
+function buildMomentCamera(context, gs, resolutionActive = false) {
   const players = context?.players || [];
   const ballCarrier = players.find(p => p.id === context?.ballCarrierId) || players.find(p => p.hB);
 
@@ -111,10 +335,15 @@ function buildMomentCamera(context, gs) {
   const width = Math.max(8, maxX - minX);
   const height = Math.max(8, maxY - minY);
 
-  const xPad = gs === "MIDFIELD" ? 14 : 12;
-  const yPad = gs === "MIDFIELD" ? 24 : 22;
+  // During the resolution beat (the ~1s after both reads are revealed), pull
+  // the frame in tighter around the same focus players -- this is the "camera
+  // push" moment. It relaxes back to the normal wider framing as soon as
+  // resolutionActive clears, via the transition already on the pitch wrapper.
+  const tighten = resolutionActive ? 0.6 : 1;
+  const xPad = (gs === "MIDFIELD" ? 14 : 12) * tighten;
+  const yPad = (gs === "MIDFIELD" ? 24 : 22) * tighten;
   const rawZoom = Math.min(100 / (width + xPad), 100 / (height + yPad));
-  const maxZoom = gs === "ATTACK" ? 3.35 : gs === "DEFEND" ? 3.18 : 2.85;
+  const maxZoom = (gs === "ATTACK" ? 3.35 : gs === "DEFEND" ? 3.18 : 2.85) * (resolutionActive ? 1.15 : 1);
   const closeFloor = gs === "MIDFIELD" ? 1.72 : 1.86;
   const zoom = (rawZoom >= closeFloor ? Math.min(rawZoom, maxZoom) : rawZoom) * 0.92;
 
@@ -136,6 +365,20 @@ function buildMomentCamera(context, gs) {
   };
 }
 
+function buildClipCamera(camera, fallback) {
+  if (!camera?.target) return fallback;
+  const scale = clamp(camera.scale || 1.16, 1, 1.38);
+  const halfW = 50 / scale;
+  const halfH = 50 / scale;
+  const x = clamp(camera.target.x ?? 50, halfW, 100 - halfW);
+  const y = clamp(camera.target.y ?? 50, halfH + 4, 100 - halfH - 4);
+  return {
+    transform: `translate(${(50 - x) * scale}%, ${(50 - y) * scale}%) scale(${scale})`,
+    transformOrigin: "50% 50%",
+    transition: `transform ${Math.max(520, camera.duration || 900)}ms cubic-bezier(0.22,1,0.36,1)`,
+  };
+}
+
 function buildMatchSnapshot(S) {
   const repTier = clamp(Math.floor((S.rep || 50) / 60), 0, 3);
   const cpuBase = 4 + repTier;
@@ -153,6 +396,7 @@ function buildMatchSnapshot(S) {
     },
     score:{ h:0, a:0 }, turn:1, max:MAX_TURNS,
     gs:"MIDFIELD", phase:"playing", si:openingSituation, midfieldSide:"home",
+    lane:"central",
   };
 
   return { game, timeSeed, matchStats: { ...EMPTY_MATCH_STATS } };
@@ -160,11 +404,41 @@ function buildMatchSnapshot(S) {
 
 const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
-const nextSituationIndex = (current, phase) => {
-  const poolSize = TURN_SITUATIONS[phase]?.length || 1;
-  if (poolSize <= 1) return current + 1;
-  const step = 1 + Math.floor(rand01() * Math.min(4, poolSize - 1));
-  return current + step;
+// Reduces a situation's ballZone tag ("left_midfield", "central_attack", ...)
+// down to just its lane, so continuity can be judged independent of phase.
+function laneOf(zone) {
+  if (!zone) return "central";
+  if (zone.startsWith("left")) return "left";
+  if (zone.startsWith("right")) return "right";
+  return "central";
+}
+
+const ADJACENT_LANES = {
+  left:    ["left", "central"],
+  central: ["left", "central", "right"],
+  right:   ["right", "central"],
+};
+
+// Picks the next situation, but no longer as a pure random jump across the
+// entire pool. Instead it stays within the same or an adjacent lane (left/
+// central/right) of wherever play just was, so consecutive turns read as a
+// continuous phase of play instead of the pitch re-scattering every turn.
+// Falls back to the full pool only if nothing in-lane is available.
+const nextSituationIndex = (current, phase, lane = "central") => {
+  const pool = TURN_SITUATIONS[phase] || [];
+  if (pool.length <= 1) return current + 1;
+
+  const allowedLanes = ADJACENT_LANES[lane] || ["left", "central", "right"];
+  const candidates = pool
+    .map((s, idx) => ({ idx, lane: laneOf(s.ballZone) }))
+    .filter(c => c.idx !== current && allowedLanes.includes(c.lane));
+
+  const pickFrom = candidates.length
+    ? candidates
+    : pool.map((_, idx) => ({ idx })).filter(c => c.idx !== current);
+
+  const choice = pickFrom[Math.floor(rand01() * pickFrom.length)];
+  return choice ? choice.idx : (current + 1) % pool.length;
 };
 
 function displayFromGame(g, S) {
@@ -177,6 +451,32 @@ function displayFromGame(g, S) {
     players, ball:holder?{x:holder.x,y:holder.y}:{x:50,y:50},
     stats:{...g.stats}, si:g.si, context,
   };
+}
+
+function previewNextDisplayFromTurn(g, turnResult, S) {
+  if (!g || !turnResult?.nextGs) return null;
+  const prevGs = g.gs;
+  const prevMidfieldSide = g.midfieldSide || "home";
+  const prevSituation = TURN_SITUATIONS[prevGs]?.[g.si];
+  const nextGs = turnResult.nextGs || "MIDFIELD";
+  const nextLane = turnResult.gainDirection || turnResult.lossDirection || laneOf(prevSituation?.ballZone);
+  let nextSi = nextSituationIndex(g.si, nextGs, nextLane);
+
+  if (prevGs === "MIDFIELD" && prevMidfieldSide === "away" && nextGs === "DEFEND") {
+    nextSi = pickDefendIndexFromLoss(turnResult?.lossDirection, nextSi);
+  } else if (prevGs === "MIDFIELD" && nextGs === "DEFEND") {
+    nextSi = pickDefendIndexFromLoss(turnResult?.lossDirection, nextSi);
+  }
+
+  const previewGame = {
+    ...g,
+    gs: nextGs,
+    si: nextSi,
+    lane: nextLane,
+    phase: "playing",
+    midfieldSide: nextGs === "MIDFIELD" ? (turnResult.nextMidfieldSide || "home") : null,
+  };
+  return displayFromGame(previewGame, S);
 }
 
 function StadiumSetupScreen({ progress, S, opponentName }) {
@@ -245,6 +545,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const [selectedOutcome, setSelectedOutcome] = useState(null);
   const [resolutionReaction, setResolutionReaction] = useState(null);
   const [pendingTurn, setPendingTurn] = useState(null);
+  const [consequenceClip, setConsequenceClip] = useState(null);
+  const [queuedNextDisplay, setQueuedNextDisplay] = useState(null);
+  const [consequenceCardsReady, setConsequenceCardsReady] = useState(false);
   const [chainStarting, setChainStarting] = useState(false);
   const [chainFailed, setChainFailed] = useState(false);
   const [preMatchStage, setPreMatchStage] = useState("loading");
@@ -338,6 +641,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setPhase(g.phase);
     setCommentary("");
     setPreviewIntentId(null);
+    setConsequenceClip(null);
+    setQueuedNextDisplay(null);
+    setConsequenceCardsReady(false);
     setTimePop(true);
     setTimeout(() => setTimePop(false), 400);
   };
@@ -420,8 +726,15 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const advanceTurn = (g, nextGs, turnResult = null) => {
     const prevGs = g.gs;
     const prevMidfieldSide = g.midfieldSide || "home";
+    const prevSituation = TURN_SITUATIONS[prevGs]?.[g.si];
+    // Prefer the actual direction the play just went (already computed by
+    // getTurnDirection for the transition-overlay logic below); fall back to
+    // the zone of the situation that just finished if no direction is known.
+    const nextLane = turnResult?.gainDirection || turnResult?.lossDirection || laneOf(prevSituation?.ballZone);
+
     g.gs = nextGs;
-    g.si = nextSituationIndex(g.si, nextGs);
+    g.si = nextSituationIndex(g.si, nextGs, nextLane);
+    g.lane = nextLane;
 
     if (nextGs === "MIDFIELD") {
       g.midfieldSide = turnResult?.nextMidfieldSide || "home";
@@ -711,16 +1024,58 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       if (prevPhase === "MIDFIELD" && turnResult.context?.midfieldSide !== "away") matchStatsRef.current.attacks_h++;
       if (prevPhase === "MIDFIELD" && turnResult.context?.midfieldSide === "away") matchStatsRef.current.attacks_a++;
 
-      const targetBall = turnResult.movement?.target || { x:bt.x, y:bt.y };
+      const clip = pickConsequenceClip(turnResult, prevPhase);
+      const consequenceScene = buildConsequenceScene(turnResult.context || context, turnResult, clip);
+      const targetBall = consequenceScene.ball || turnResult.movement?.target || { x:bt.x, y:bt.y };
+      const carrierId = turnResult.context?.ballCarrierId || turnResult.movement?.ballFrom || null;
+      const carrier = (turnResult.context?.players || []).find(p => p.id === carrierId);
+      const nearestPressureId = (turnResult.context?.pressurePlayers || [])
+        .map(id => (turnResult.context.players || []).find(p => p.id === id))
+        .filter(Boolean)
+        .sort((a, b) => {
+          const da = carrier ? (a.x - carrier.x) ** 2 + (a.y - carrier.y) ** 2 : 0;
+          const db = carrier ? (b.x - carrier.x) ** 2 + (b.y - carrier.y) ** 2 : 0;
+          return da - db;
+        })[0]?.id || null;
       setResolutionReaction({
-        playerId: turnResult.context?.ballCarrierId || turnResult.movement?.ballFrom || null,
+        playerId: carrierId,
+        markerId: nearestPressureId,
         ok: turnResult.ok,
       });
-      setTimeout(() => setResolutionReaction(null), 330);
-      setDisp(d => ({ ...d, ball:{ x:targetBall.x, y:targetBall.y }, context: turnResult.context || d.context }));
+      setConsequenceClip({ ...clip, camera: consequenceScene.camera });
+      setQueuedNextDisplay(previewNextDisplayFromTurn(g, turnResult, S));
+      setConsequenceCardsReady(false);
+      window.setTimeout(() => setConsequenceCardsReady(true), clip.fadeCardsAt || Math.max(700, clip.duration - 420));
+      // 950ms, not 330 -- long enough to actually register the beat (marker
+      // closing in on a loss, carrier pulling away on a win), timed to land
+      // alongside the camera's own 0.95s push-in on the same moment.
+      setTimeout(() => setResolutionReaction(null), 950);
+      setDisp(d => ({
+        ...d,
+        players: consequenceScene.context?.players || d.players,
+        ball:{ x:targetBall.x, y:targetBall.y },
+        context: consequenceScene.context || turnResult.context || d.context,
+      }));
       setCpuChoice({ lbl:turnResult.cpuLbl, favorable:turnResult.favorable, narr:turnResult.narr });
       setTimeout(() => setCommentary(turnResult.cm), 300);
       setPendingTurn({ turnResult, prevPhase });
+      if (!turnResult.goalScored && !turnResult.conceded) {
+        timerRef.current = window.setTimeout(() => {
+          const activeGame = gRef.current;
+          if (!activeGame || activeGame.phase !== "result") return;
+          setPendingTurn(null);
+          setSelectedAction(null);
+          setSelectedRate(null);
+          setSelectedOutcome(null);
+          setResolutionReaction(null);
+          setCpuChoice(null);
+          setCommentary("");
+          setConsequenceClip(null);
+          setQueuedNextDisplay(null);
+          setConsequenceCardsReady(false);
+          advanceTurn(activeGame, turnResult.nextGs, turnResult);
+        }, clip.duration + 220);
+      }
       if (!turnResult.goalScored && !turnResult.conceded) {
         playSound(turnResult.ok ? "readWin" : "readLoss", { volume:0.18 });
       }
@@ -731,6 +1086,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       setSelectedOutcome(null);
       setResolutionReaction(null);
       setPendingTurn(null);
+      setConsequenceClip(null);
+      setQueuedNextDisplay(null);
+      setConsequenceCardsReady(false);
       setPhase("playing");
       g.phase = "playing";
       const errorMsg = e?.message || "Unknown error";
@@ -749,6 +1107,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setSelectedRate(null);
     setSelectedOutcome(null);
     setResolutionReaction(null);
+    setConsequenceClip(null);
+    setQueuedNextDisplay(null);
+    setConsequenceCardsReady(false);
     setCpuChoice(null);
     setCommentary("");
 
@@ -821,14 +1182,17 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   // ── Derived render values ────────────────────────────────────────────────
   const { gs, score, turn, players, ball, si, context, midfieldSide } = disp;
   const zm         = { MIDFIELD:{ col:"#facc15" }, ATTACK:{ col:"#4ade80" }, DEFEND:{ col:"#f87171" } }[gs];
+  const animatedBall = useTweenPoint(ball, consequenceClip?.duration || 620);
   const matchTime  = turnToTime(turn, timeSeed);
   const isSecondHalf = turn > TURNS_PER_HALF;
   const turnContextLine = getTurnContextLine({ score, gs, matchTime, momentum: momentumDisplay, midfieldSide });
   const showGuide = isFirstMatch && !guidedDismissed.has(turn);
 
-  // Close moment camera: big players, while preserving the carrier/press/runner/support read.
-  const phaseCamera = buildMomentCamera(context, gs);
+  // Default is now full-field. Consequence clips can request a temporary push-in.
+  const tacticalCamera = consequenceClip ? buildMomentCamera(context, gs, !!resolutionReaction) : NEUTRAL_CAMERA;
+  const phaseCamera = buildClipCamera(consequenceClip?.camera, tacticalCamera);
   const opponentName = opponent?.name || "RIVALS FC";
+  const nextCardsDisplay = queuedNextDisplay || disp;
 
   const continuePostMatch = () => {
     if (tierOvl) {
@@ -914,6 +1278,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setSelectedOutcome(null);
     setResolutionReaction(null);
     setPendingTurn(null);
+    setConsequenceClip(null);
+    setQueuedNextDisplay(null);
+    setConsequenceCardsReady(false);
     setCommentary("");
     setMatchFeed("Opening whistle. Read the first pressure.");
     setPauseOpen(false);
@@ -945,6 +1312,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     setSelectedRate(null);
     setSelectedOutcome(null);
     setPendingTurn(null);
+    setConsequenceClip(null);
+    setQueuedNextDisplay(null);
+    setConsequenceCardsReady(false);
     setCpuChoice(null);
     setCommentary("");
     setMatchFeed("Extra time begins. Four reads to break the draw.");
@@ -968,13 +1338,25 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   return (
     <MatchStadiumShell>
     <div style={{ position:"absolute", inset:0, display:"flex", flexDirection:"column", background:"transparent" }}>
-      <div style={{ position:"absolute", inset:0, overflow:"hidden", padding:"50px 18px 74px", boxSizing:"border-box" }}>
+      <div style={{ position:"absolute", inset:0, overflow:"hidden", padding:0, boxSizing:"border-box" }}>
         {/* ── 3-D Pitch ─────────────────────────────────────────────────── */}
         <div style={{ position:"absolute", inset:0, overflow:"hidden" }}>
           <div style={{
-            position:"absolute", left:"4.5%", right:"4.5%", top:"8.5%", bottom:"10.5%",
-            borderRadius:"16px",
+            position:"absolute", left:0, right:0, top:0, bottom:0,
+            borderRadius:0,
             overflow:"hidden",
+          }}>
+          <div style={{
+            position:"absolute",
+            inset:0,
+            transform: phaseCamera.transform,
+            transformOrigin: phaseCamera.transformOrigin,
+            transition: phaseCamera.transition || "transform 0.95s cubic-bezier(0.22,1,0.36,1)",
+            willChange: "transform",
+          }}>
+          <div style={{
+            position:"absolute",
+            inset:0,
             background:`
               repeating-linear-gradient(
                 180deg,
@@ -1004,10 +1386,6 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
             `,
             boxShadow:"0 22px 54px rgba(0,0,0,.32), inset 0 0 0 1px rgba(232,255,232,.10), inset 0 0 36px rgba(0,0,0,.12)",
             filter:"saturate(1.04) brightness(.95) contrast(1.04)",
-            transform: phaseCamera.transform,
-            transformOrigin: phaseCamera.transformOrigin,
-            transition: "transform 0.95s cubic-bezier(0.22,1,0.36,1)",
-            willChange: "transform",
           }}>
             <PitchMarkings/>
 
@@ -1063,7 +1441,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
             {/* Ball spotlight */}
             <div style={{ position:"absolute", zIndex:5, pointerEvents:"none",
               width:"42%", height:"42%",
-              left:`${ball.x}%`, top:`${ball.y}%`, transform:"translate(-50%,-50%)",
+              left:`${animatedBall.x}%`, top:`${animatedBall.y}%`, transform:"translate(-50%,-50%)",
               background:`radial-gradient(ellipse 34% 34% at 50% 50%,${zm.col}12 0%,transparent 70%)`,
               transition:"left .6s cubic-bezier(.25,.46,.45,.94),top .5s cubic-bezier(.25,.46,.45,.94)",
               animation:"glowPulse 2s ease-in-out infinite" }}/>
@@ -1073,15 +1451,17 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
               {players.map((p, i) => {
                 const isActive = p.hB;
                 // Away players are never fully ghosted — they are real threats (Fix 10)
-                const isFar    = p.emphasis === "dim" && !p.tags?.includes("pressure") && (!p.hB && Math.abs(p.x-ball.x)>38);
+                const isFar    = p.emphasis === "dim" && !p.tags?.includes("pressure") && (!p.hB && Math.abs(p.x-animatedBall.x)>38);
                 return <PlayerFigure key={p.id || i} p={p} idx={i} celebrate={celebrate} gs={gs} isActive={isActive} isFar={isFar} context={context} previewIntentId={previewIntentId} reaction={resolutionReaction}/>;
               })}
             </div>
 
             {/* Ball */}
             <div style={{ position:"absolute", inset:0, zIndex:10, pointerEvents:"none" }}>
-              <PremiumBall ball={ball} gs={gs}/>
+              <PremiumBall ball={animatedBall} gs={gs}/>
             </div>
+          </div>
+          </div>
           </div>
         </div>
 
@@ -1284,21 +1664,47 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
         {/* Decision / resolution screens */}
         {phase === "result" ? (
-          <ResolutionScreen
-            gs={gs}
-            playerAction={selectedAction}
-            rivalAction={cpuChoice?.lbl || "COUNTER"}
-            successRate={selectedRate}
-            resultOk={selectedOutcome}
-            isResolving={!pendingTurn}
-            message={commentary || "Resolving your choice..."}
-            onContinue={continueAfterResolution}
-            context={context}
-            turnResult={pendingTurn?.turnResult}
-            homeClub={S.clubName || "ZAP"}
-            awayClub={opponentName}
-            score={score}
-          />
+          <>
+            <ResolutionScreen
+              gs={gs}
+              playerAction={selectedAction}
+              rivalAction={cpuChoice?.lbl || "COUNTER"}
+              successRate={selectedRate}
+              resultOk={selectedOutcome}
+              isResolving={!pendingTurn}
+              message={commentary || "Resolving your choice..."}
+              onContinue={continueAfterResolution}
+              context={context}
+              turnResult={pendingTurn?.turnResult}
+              homeClub={S.clubName || "ZAP"}
+              awayClub={opponentName}
+              score={score}
+            />
+            {queuedNextDisplay && (
+              <div style={{
+                position:"absolute",
+                left:0,
+                right:0,
+                bottom:0,
+                zIndex:26,
+                opacity:consequenceCardsReady ? 0.92 : 0,
+                transform:`translateY(${consequenceCardsReady ? 0 : 16}px)`,
+                transition:"opacity .42s ease, transform .42s ease",
+                pointerEvents:"none",
+              }}>
+                <ActionCards
+                  gs={nextCardsDisplay.gs}
+                  si={nextCardsDisplay.si}
+                  phase="playing"
+                  onAction={() => {}}
+                  context={nextCardsDisplay.context}
+                  previewIntentId={null}
+                  onPreviewIntent={() => {}}
+                  disabled
+                />
+              </div>
+            )}
+          </>
         ) : (
           <ActionCards
             gs={gs}

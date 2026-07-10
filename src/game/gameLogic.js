@@ -179,59 +179,41 @@ const PHASE_PLAYER_LAYOUTS = {
       { id:"a_rb",  role:"RB", x:64, y:25 }, { id:"a_dm",  role:"DM", x:53, y:52 },
       { id:"a_cm",  role:"CM", x:48, y:46 }, { id:"a_lm",  role:"LM", x:51, y:70 },
       { id:"a_rm",  role:"RM", x:51, y:30 }, { id:"a_st1", role:"ST", x:38, y:40 },
-      { id:"a_st",  role:"ST", x:43, y:56 },
+      { id:"a_st2", role:"ST", x:43, y:56 },
     ],
   },
 };
 
-const cueIds = (situation) => new Set((situation?.cues || []).map(c => c.id));
+const cueIdOf = (cue) => (typeof cue === "string" ? cue : cue?.id);
+
+const cueIds = (situation) => new Set((situation?.cues || []).map(cueIdOf).filter(Boolean));
 
 const normalizeCueLabel = (cue) => {
   if (!cue) return cue;
-  const pressureAsFoul = cue.id === "pressure_on" && /foul/i.test(cue.label || "");
-  const label = pressureAsFoul ? CUE_LABELS.foul_risk : (CUE_LABELS[cue.id] || cue.label);
-  return { ...cue, label };
+  const id = cueIdOf(cue);
+  const rawLabel = typeof cue === "string" ? "" : cue.label;
+  const pressureAsFoul = id === "pressure_on" && /foul/i.test(rawLabel || "");
+  const label = pressureAsFoul ? CUE_LABELS.foul_risk : (CUE_LABELS[id] || rawLabel || id);
+  return typeof cue === "string" ? { id, label } : { ...cue, id, label };
 };
 
-const buildScenePositions = (players, situation, phase, sceneIndex) => {
+const buildScenePositions = (players, situation) => {
+  // Only ever use positions EXPLICITLY attached to this exact situation
+  // (situation.positions). The old fallback matched SCENES[phase][sceneIndex % length]
+  // purely by array-index arithmetic -- coincidental, not a real reference -- so a
+  // hand-authored "2v1 overload" layout could silently end up attached to a totally
+  // different situation the moment either array's length or order changed.
+  //
+  // Removing that fallback means the cue-driven logic below (pressure/open/insideTight/
+  // longChannel/spaceBehind/dangerRun) is now the single source of truth for position,
+  // for every situation, every time. Keep SCENES only for genuinely one-off moments
+  // (e.g. a scripted set piece) by setting situation.positions directly on that
+  // situation's own object -- never through sceneIndex.
   if (situation?.positions) return situation.positions;
-
-  const scene = SCENES?.[phase]?.[sceneIndex % (SCENES?.[phase]?.length || 1)];
-  if (!scene?.length) return null;
-
-  const byId = (id) => players.find(p => p.id === id) || null;
-  const first = (ids = [], test = () => true, used = new Set()) =>
-    ids.map(byId).find(p => p && test(p) && !used.has(p.id)) || null;
-  const used = new Set();
-  const carrier = byId(situation.ballCarrierId) || players[0];
-  const slots = [];
-
-  if (carrier) {
-    slots.push(carrier);
-    used.add(carrier.id);
-  }
-
-  const home = p => p.id.startsWith("h_");
-  const away = p => p.id.startsWith("a_");
-  const supportHome = first(situation.supportOptionIds, home, used) || first(situation.activePlayerIds, home, used);
-  if (supportHome) { slots.push(supportHome); used.add(supportHome.id); }
-
-  const openHome = first(situation.openPlayerIds, home, used) || first(situation.supportOptionIds, home, used) || first(situation.activePlayerIds, home, used);
-  if (openHome) { slots.push(openHome); used.add(openHome.id); }
-
-  const pressureAway = first(situation.pressurePlayerIds, away, used) || first(situation.activePlayerIds, away, used);
-  if (pressureAway) { slots.push(pressureAway); used.add(pressureAway.id); }
-
-  const secondAway = first([...(situation.openPlayerIds || []), ...(situation.activePlayerIds || []), ...(situation.pressurePlayerIds || [])], away, used);
-  if (secondAway) { slots.push(secondAway); used.add(secondAway.id); }
-
-  return slots.reduce((acc, player, idx) => {
-    if (scene[idx]) acc[player.id] = scene[idx];
-    return acc;
-  }, {});
+  return null;
 };
 
-const withSituationAdjustments = (players, situation, phase = "MIDFIELD", sceneIndex = 0) => {
+const withSituationAdjustments = (players, situation, phase = "MIDFIELD") => {
   const cues = cueIds(situation);
   const ballBase = players.find(p => p.id === situation.ballCarrierId) || null;
   const pressureIds = new Set(situation.pressurePlayerIds || []);
@@ -246,7 +228,10 @@ const withSituationAdjustments = (players, situation, phase = "MIDFIELD", sceneI
   const hasLongChannel = cues.has("long_lane");
   const hasDangerRun = cues.has("danger_run");
   const hasSpaceBehind = cues.has("space_behind");
-  const authoredPositions = buildScenePositions(players, situation, phase, sceneIndex);
+  const hasBoxCrowded = cues.has("box_crowded");
+  const hasRunnerFree = cues.has("runner_free");
+  const hasShotClosing = cues.has("shot_closing");
+  const authoredPositions = buildScenePositions(players, situation);
 
   const clampPt = (x, y) => ({
     x: clamp(x, 4, 96),
@@ -271,7 +256,11 @@ const withSituationAdjustments = (players, situation, phase = "MIDFIELD", sceneI
     if (openIds.has(p.id) && carrier) {
       const openIndex = openList.findIndex(pp => pp.id === p.id);
       const flankBias = p.role === "LW" || p.role === "LM" ? -18 : p.role === "RW" || p.role === "RM" ? 18 : openIndex % 2 ? 13 : -13;
-      const push = hasDangerRun ? 20 : hasLongChannel ? 23 : 16;
+      const push = hasDangerRun ? 20
+        : hasLongChannel ? 23
+        : hasRunnerFree ? 22
+        : hasShotClosing ? 12
+        : 16;
       const pt = clampPt(carrier.x + forward * push, carrier.y + flankBias);
       x = pt.x; y = pt.y;
       angle = home ? -5 : 5;
@@ -288,6 +277,24 @@ const withSituationAdjustments = (players, situation, phase = "MIDFIELD", sceneI
         ST: p.id.endsWith("1") ? [52, 43] : [52, 57],
       }[p.role];
       if (cluster && Math.abs(p.x - carrier.x) < 30) {
+        x = cluster[0];
+        y = cluster[1];
+      }
+    }
+
+    // box_crowded: the ATTACK-phase counterpart to inside_tight. Pulls the away
+    // side's defenders into a tight knot in front of their own goal, instead of
+    // their normal spread-out defensive shape -- visualizing "the box is packed"
+    // the same way inside_tight visualizes "the middle is packed".
+    if (hasBoxCrowded && !home && ["CB", "LB", "RB", "DM", "CM"].includes(p.role)) {
+      const cluster = {
+        CB: p.id.endsWith("1") ? [87, 44] : [87, 56],
+        LB: [88, 62],
+        RB: [88, 38],
+        DM: [85, 50],
+        CM: [83, 46],
+      }[p.role];
+      if (cluster) {
         x = cluster[0];
         y = cluster[1];
       }
@@ -423,27 +430,30 @@ const getReadOptionIds = (players, situation, gs) => {
 
   if (gs === "MIDFIELD") {
     const offBallHome = players.filter(p => p.id !== situation.ballCarrierId);
+    for (const p of idsToPlayers(situation.pressurePlayerIds)) add(p);
+    add(firstAwayByRole(players, ["CM", "DM", "RM", "LM"]));
     add(firstHomeByRole(offBallHome, ["RW", "LW", "RB", "LB", "RM", "LM"], side));
     add(firstHomeByRole(players, ["ST"]));
     add(firstHomeByRole(offBallHome, ["AM", "CM", "DM"]));
-    for (const p of idsToPlayers(situation.pressurePlayerIds)) add(p);
     return ids;
   }
 
   if (gs === "ATTACK") {
     add(idsToPlayers(situation.openPlayerIds).find(p => p.id?.startsWith("h_")));
-    add(firstBy(players, p => p.id === "a_gk"));
-    add(idsToPlayers(situation.supportOptionIds).find(p => p.id?.startsWith("h_")));
     add(firstAwayByRole(players, ["CB", "LB", "RB", "DM"]));
     for (const p of idsToPlayers(situation.pressurePlayerIds)) add(p);
+    add(idsToPlayers(situation.supportOptionIds).find(p => p.id?.startsWith("h_")));
+    add(firstAwayByRole(players, ["CB", "DM", "RB", "LB"]));
+    add(firstBy(players, p => p.id === "a_gk"));
     return ids;
   }
 
   if (gs === "DEFEND") {
     add(firstBy(players, p => p.id === "h_gk"));
+    add(idsToPlayers(situation.openPlayerIds).find(p => p.id?.startsWith("a_")));
+    add(firstAwayByRole(players, ["ST", "RW", "LW", "AM"]));
     add(idsToPlayers(situation.pressurePlayerIds).find(p => p.id?.startsWith("h_")));
     add(idsToPlayers(situation.supportOptionIds).find(p => p.id?.startsWith("h_")));
-    add(idsToPlayers(situation.openPlayerIds).find(p => p.id?.startsWith("a_")));
     add(firstHomeByRole(players, ["CB", "DM", "RB", "LB"]));
   }
 
@@ -493,12 +503,27 @@ const limitVisiblePlayers = (players, situation, gs) => {
 
   const byId = new Map(players.map(p => [p.id, p]));
   const visible = orderedIds.map(id => byId.get(id)).filter(Boolean);
-  if (visible.length < 4) {
-    for (const p of players) {
-      if (visible.length >= 4) break;
-      if (!seen.has(p.id)) visible.push(p);
-    }
+  const visibleIds = new Set(visible.map(p => p.id));
+  const rolePriority = gs === "ATTACK"
+    ? ["CB", "DM", "LB", "RB", "CM"]
+    : gs === "DEFEND"
+      ? ["ST", "RW", "LW", "AM", "CM"]
+      : ["CM", "DM", "RM", "LM", "ST"];
+  const roleRank = (role) => {
+    const rank = rolePriority.indexOf(role);
+    return rank === -1 ? rolePriority.length : rank;
+  };
+  const awayOutfield = players
+    .filter(p => p.t === "a" && p.role !== "GK" && !visibleIds.has(p.id))
+    .sort((a, b) => roleRank(a.role) - roleRank(b.role));
+
+  for (const p of awayOutfield) {
+    const count = visible.filter(v => v.t === "a" && v.role !== "GK").length;
+    if (count >= 2 || visible.length >= 7) break;
+    visible.push(p);
+    visibleIds.add(p.id);
   }
+
   return visible.slice(0, 7);
 };
 
@@ -743,7 +768,7 @@ export const resolveIntent = ({ context, playerIntent, opponentIntent, stats = {
   const ballTo  = route?.to || context?.ball || { x: 50, y: 50 };
 
   // ── CUE-AWARE FEEDBACK (Fix 2) ───────────────────────────────────────────
-  const activeCueIds = (context?.cues || []).map(c => c.id);
+  const activeCueIds = (context?.cues || []).map(cueIdOf).filter(Boolean);
   const why = getCueFeedback(pIntent?.id, activeCueIds, ok);
 
   const counterLine = matchup.result === 2

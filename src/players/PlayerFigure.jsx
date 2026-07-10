@@ -7,11 +7,8 @@
 //     and update the import paths below to match your filenames.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { useEffect, useState } from "react";
-
-const idlePng    = "/assets/players/player_idle.png";
-const attackPng  = "/assets/players/player_attack.png";
-const defensePng = "/assets/players/player_defend.png";
+import { useEffect, useRef, useState } from "react";
+import { PLAYER_ANIMATION_STATE, PLAYER_ASSET_FALLBACKS, PLAYER_ASSETS } from "./playerAssets.js";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -38,26 +35,72 @@ function getIntentTargetId(context, intentId) {
   return routeTo || null;
 }
 
-// Resolve PNG from explicit pose tag first, then fall back to state-derived logic.
-// p.pose is set by getPlayerPose() in gameLogic — "run"|"defend"|"idle"
-function getPoseFromTag(poseTag) {
-  if (poseTag === "run")    return attackPng;
-  if (poseTag === "defend") return defensePng;
-  return idlePng;
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const easeOutCubic = (t) => 1 - Math.pow(1 - t, 3);
+
+function useTweenPoint(target, duration = 620) {
+  const targetX = target.x;
+  const targetY = target.y;
+  const [point, setPoint] = useState(target);
+  const pointRef = useRef(target);
+  const rafRef = useRef(null);
+
+  useEffect(() => {
+    const from = pointRef.current || { x: targetX, y: targetY };
+    const to = { x: targetX, y: targetY };
+    const startedAt = performance.now();
+    cancelAnimationFrame(rafRef.current);
+
+    const tick = (now) => {
+      const t = easeOutCubic(clamp01((now - startedAt) / Math.max(1, duration)));
+      const next = {
+        x: from.x + (to.x - from.x) * t,
+        y: from.y + (to.y - from.y) * t,
+      };
+      pointRef.current = next;
+      setPoint(next);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+
+    rafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(rafRef.current);
+  }, [targetX, targetY, duration]);
+
+  return point;
 }
 
-function getPose(state, gs, poseTag) {
+// Resolve animation key from explicit pose tag first, then fall back to state.
+// p.pose is set by getPlayerPose() in gameLogic: "run"|"defend"|"idle".
+function getAnimationStateFromTag(poseTag, isGoalkeeper) {
+  if (poseTag === PLAYER_ANIMATION_STATE.GK_DIVE || poseTag === "gk_dive") return PLAYER_ANIMATION_STATE.GK_DIVE;
+  if (poseTag === PLAYER_ANIMATION_STATE.GK_READY || poseTag === "gk_ready") return PLAYER_ANIMATION_STATE.GK_READY;
+  if (poseTag === "run" || poseTag === PLAYER_ANIMATION_STATE.RUNNING) return PLAYER_ANIMATION_STATE.RUNNING;
+  if (poseTag === "defend" || poseTag === PLAYER_ANIMATION_STATE.DEFENSE) return PLAYER_ANIMATION_STATE.DEFENSE;
+  if (isGoalkeeper) return PLAYER_ANIMATION_STATE.GK_READY;
+  return PLAYER_ANIMATION_STATE.IDLE;
+}
+
+function getAnimationState(state, gs, poseTag, isGoalkeeper) {
   // If the player has an explicit pose from the situation data, use it
-  if (poseTag) return getPoseFromTag(poseTag);
+  if (poseTag) return getAnimationStateFromTag(poseTag, isGoalkeeper);
   // Fallback: derive from visual state
-  if (state === "ballCarrier")   return gs === "DEFEND" ? defensePng : attackPng;
-  if (state === "underPressure") return defensePng;
-  if (state === "open")          return attackPng;
-  if (state === "selected")      return attackPng;
-  return idlePng;
+  if (isGoalkeeper) return PLAYER_ANIMATION_STATE.GK_READY;
+  if (state === "ballCarrier")   return gs === "DEFEND" ? PLAYER_ANIMATION_STATE.DEFENSE : PLAYER_ANIMATION_STATE.RUNNING;
+  if (state === "underPressure") return PLAYER_ANIMATION_STATE.DEFENSE;
+  if (state === "open")          return PLAYER_ANIMATION_STATE.RUNNING;
+  if (state === "selected")      return PLAYER_ANIMATION_STATE.RUNNING;
+  return PLAYER_ANIMATION_STATE.IDLE;
 }
 
-function getHomeFilter(state) {
+function resolvePlayerAsset(teamStyle, animationState) {
+  return PLAYER_ASSETS[teamStyle]?.[animationState] || PLAYER_ASSET_FALLBACKS[animationState] || PLAYER_ASSET_FALLBACKS.idle;
+}
+
+function getAssetFallback(animationState) {
+  return PLAYER_ASSET_FALLBACKS[animationState] || PLAYER_ASSET_FALLBACKS.idle;
+}
+
+function getFigureShadow(state) {
   switch (state) {
     case "ballCarrier":
       return "drop-shadow(0 0 10px rgba(96,165,250,0.95)) drop-shadow(0 0 22px rgba(96,165,250,0.50)) drop-shadow(0 2px 5px rgba(0,0,0,0.55))";
@@ -102,14 +145,10 @@ function getBadgeColor(state) {
 // ── component ────────────────────────────────────────────────────────────────
 
 export default function PlayerFigure({ p, isActive, isFar, context, previewIntentId, gs, reaction }) {
-  const [pos, setPos] = useState(() => p.enterFrom || { x:p.x, y:p.y });
-
-  useEffect(() => {
-    const raf = requestAnimationFrame(() => setPos({ x:p.x, y:p.y }));
-    return () => cancelAnimationFrame(raf);
-  }, [p.id, p.x, p.y]);
-
   const isHome = p.t === "h";
+  const teamStyle = isHome ? "player" : "opponent";
+  const tweenDuration = Number(p.tween?.duration || 620);
+  const pos = useTweenPoint({ x:p.x, y:p.y }, tweenDuration);
   const tags   = new Set(p.tags || []);
 
   const isOpen         = tags.has("open");
@@ -155,22 +194,38 @@ export default function PlayerFigure({ p, isActive, isFar, context, previewInten
     : isSupport                  ? 0.88
     : 0.94;
 
-  const pose       = getPose(state, gs, p.pose);
+  const animationState = getAnimationState(state, gs, p.pose, isGoalkeeper);
+  const pose = resolvePlayerAsset(teamStyle, animationState);
+  const poseFallback = getAssetFallback(animationState);
   const groundGlow = isHome ? getGroundGlow(state) : getAwayGroundGlow(state);
 
-  // Home: full colour + glow  |  Away: dark silhouette
-  const imgFilter = isHome
-    ? getHomeFilter(state)
-    : state === "ballCarrier" || state === "underPressure"
-      ? "brightness(0.48) saturate(0.25) sepia(0.95) hue-rotate(322deg) contrast(1.22) drop-shadow(0 0 12px rgba(248,113,113,0.36)) drop-shadow(0 2px 7px rgba(0,0,0,0.72))"
-      : "brightness(0.38) grayscale(0.48) saturate(0.28) sepia(0.7) hue-rotate(320deg) contrast(1.18) drop-shadow(0 2px 7px rgba(0,0,0,0.72))";
-
   const lean = p.angle || 0;
-  const imgTransform = `${isHome ? "" : "scaleX(-1) "}rotate(${lean}deg)`;
+  const stanceTransform = animationState === PLAYER_ANIMATION_STATE.GK_READY
+    ? "scaleX(1.12) scaleY(0.92) translateY(3px) "
+    : animationState === PLAYER_ANIMATION_STATE.GK_DIVE
+      ? "scaleX(1.18) rotate(-15deg) "
+      : "";
+  const imgTransform = `${isHome ? "" : "scaleX(-1) "}${stanceTransform}rotate(${lean}deg)`;
   const isReacting = reaction?.playerId === p.id;
+  const isMarkerReacting = reaction?.markerId === p.id;
   const reactionDir = isHome ? 1 : -1;
-  const reactionX = isReacting ? (reaction.ok ? 10 * reactionDir : -8 * reactionDir) : 0;
-  const reactionRotate = isReacting && !reaction.ok ? -8 * reactionDir : 0;
+
+  // Carrier's own reaction: forward nudge on a won read, a small flinch back
+  // on a lost one.
+  const carrierX = isReacting ? (reaction.ok ? 10 * reactionDir : -8 * reactionDir) : 0;
+  const carrierRotate = isReacting && !reaction.ok ? -8 * reactionDir : 0;
+
+  // Marker's reaction: only animates when the marker actually won the duel
+  // (reaction.ok === false means the attacker's read lost). This is the
+  // "interception" beat -- a real closing lunge toward the ball, not just a
+  // flinch, and it gets a longer transition below so it has time to read.
+  const markerLunging = isMarkerReacting && reaction && !reaction.ok;
+  const markerX = markerLunging ? 16 * reactionDir : 0;
+  const markerRotate = markerLunging ? 10 * reactionDir : 0;
+
+  const reactionX = carrierX + markerX;
+  const reactionRotate = carrierRotate + markerRotate;
+  const reactionActive = isReacting || markerLunging;
   const wrapperTransform = `translate(-50%, -50%) translateX(${reactionX}px) rotate(${reactionRotate}deg)`;
 
   // Pulse animation class
@@ -191,9 +246,7 @@ export default function PlayerFigure({ p, isActive, isFar, context, previewInten
         top:  pos.y + "%",
         transform: wrapperTransform,
         transition:
-          "left .42s cubic-bezier(.2,.82,.22,1), " +
-          "top  .42s cubic-bezier(.2,.82,.22,1), " +
-          "transform .3s cubic-bezier(.2,.82,.22,1), " +
+          `transform ${reactionActive ? "0.85s" : ".3s"} cubic-bezier(.2,.82,.22,1), ` +
           "opacity .28s ease",
         opacity,
         zIndex: isActive ? 12
@@ -258,12 +311,16 @@ export default function PlayerFigure({ p, isActive, isFar, context, previewInten
           src={pose}
           alt=""
           draggable={false}
+          onError={(e) => {
+            if (e.currentTarget.src.endsWith(poseFallback)) return;
+            e.currentTarget.src = poseFallback;
+          }}
           style={{
             display: "block",
             height: figH,
             width: "auto",
             objectFit: "contain",
-            filter: imgFilter,
+            filter: getFigureShadow(state),
             transform: imgTransform,
             transition: "filter .3s ease, height .32s ease",
             animation: anim,

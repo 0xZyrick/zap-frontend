@@ -68,6 +68,9 @@ const katana = {
     default: { http: [KATANA_URL] },
     public: { http: [KATANA_URL] },
   },
+  paymasterRpcUrls: {
+    avnu: { http: [KATANA_URL] },
+  },
 };
 
 // ── Session Policies (Gas-less Transactions) ──────────────────────────────────
@@ -162,9 +165,15 @@ const provider = jsonRpcProvider({
 
 // ── Controller Connector (Created outside React) ───────────────────────────────
 // This must be created once at module level, not inside components
+const controllerChains = [
+  { rpcUrl: KATANA_URL },
+  { rpcUrl: "https://api.cartridge.gg/x/starknet/sepolia" },
+  { rpcUrl: "https://api.cartridge.gg/x/starknet/mainnet" },
+];
+
 const connector = new ControllerConnector({
-  chains: [{ rpcUrl: RPC_URL }],
-  defaultChainId: KATANA_CHAIN_ID,
+  chains: controllerChains,
+  defaultChainId: CHAIN_ID,
   policies: USE_CARTRIDGE ? policies : undefined,
   rpcUrl: RPC_URL,
   shouldOverridePresetPolicies: true,

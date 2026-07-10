@@ -25,6 +25,7 @@ img { user-select:none; -webkit-user-select:none; -webkit-user-drag:none }
 /* ── Keyframes ── */
 @keyframes bounceIn        { 0%{transform:scale(.1) rotate(-20deg);opacity:0} 55%{transform:scale(1.25) rotate(6deg);opacity:1} 75%{transform:scale(.9) rotate(-3deg)} 100%{transform:scale(1) rotate(0);opacity:1} }
 @keyframes flashIn         { from{opacity:0} to{opacity:1} }
+@keyframes spin            { from{transform:rotate(0deg)} to{transform:rotate(360deg)} }
 @keyframes slideUp         { from{opacity:0;transform:translate(-50%,18px)} to{opacity:1;transform:translate(-50%,0)} }
 @keyframes slideUpSimple   { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
 @keyframes goalBurst       { from{transform:scale(.8);opacity:0} to{transform:scale(1);opacity:1} }

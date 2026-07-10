@@ -27,12 +27,13 @@ const stateKey = (wallet) => `zapfc:s5:${walletKey(wallet)}`;
 const leaderboardKey = (wallet) => `zapfc:lb5:${walletKey(wallet)}`;
 const TRAINING_MODE_ENABLED = false;
 const BOOT_LOADING_MS = 13000;
+const ENTER_CONNECT_TIMEOUT_MS = 9000;
 const PLAYER_LOADING = "/assets/players/loading-anime.png";
 const LOADING_BG = "/assets/bg/loading-bg.png";
 const ZAP_LOGO = "/assets/logo/zap-logo.png";
-const ZAP_DOCS_URL = import.meta.env.VITE_ZAP_DOCS_URL || "https://playzap.vercel.app/docs";
-const ZAP_X_URL = import.meta.env.VITE_ZAP_X_URL || "https://x.com/playzap";
-const ZAP_TELEGRAM_URL = import.meta.env.VITE_ZAP_TELEGRAM_URL || "https://t.me/playzap";
+const ZAP_X_URL = import.meta.env.VITE_ZAP_X_URL || "https://x.com/humblechigozie_";
+const ZAP_TELEGRAM_URL = import.meta.env.VITE_ZAP_TELEGRAM_URL || "https://t.me/+fIcD-lidDI81ZWE0";
+const ZAP_DOCS_URL = import.meta.env.VITE_ZAP_DOCS_URL || "https://0xzyrick.github.io/zap-docs";
 const CRITICAL_ASSETS = [
   "/assets/bg/spilt-bg.png",
   "/assets/bg/home-bg.png",
@@ -61,6 +62,15 @@ const loadProfile = (wallet) => {
     if (r) lb = JSON.parse(r);
   } catch (_) {}
   return { s, lb };
+};
+
+const withTimeout = (promise, ms, label) => {
+  let timer = null;
+  const timeout = new Promise((_, reject) => {
+    timer = window.setTimeout(() => reject(new Error(label)), ms);
+  });
+  promise.catch(() => null);
+  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer));
 };
 
 function SplashSocialIcon({ type }) {
@@ -172,9 +182,9 @@ function LoadingScreen({ label = "LOADING CLUBHOUSE", ready = false, entering = 
       <div className="zap-splash__corner">
         <div className="zap-splash__socials" aria-label="ZAP links">
           {[
-            { label:"Game document", href:ZAP_DOCS_URL, type:"docs" },
             { label:"ZAP on X", href:ZAP_X_URL, type:"x" },
             { label:"ZAP on Telegram", href:ZAP_TELEGRAM_URL, type:"telegram" },
+            { label:"ZAP documentation", href:ZAP_DOCS_URL, type:"docs" },
           ].map((link) => (
             <a
               key={link.type}
@@ -245,10 +255,13 @@ export default function Zap() {
   const [selectedFId,   setSelectedFId]   = useState("control-433");
   const [matchOpponent, setMatchOpponent] = useState(null);
   const [entering,      setEntering]      = useState(false);
+  const [profileSyncing, setProfileSyncing] = useState(false);
+  const [welcomeBanner, setWelcomeBanner] = useState(null);
   const [clubPrompt,    setClubPrompt]    = useState(false);
   const [savingClub,    setSavingClub]    = useState(false);
 
   const toastRef = useRef(null);
+  const welcomeRef = useRef(null);
   const registerPromiseRef = useRef(null);
 
   const { account, address, provider, connect } = useWallet();
@@ -310,6 +323,13 @@ export default function Zap() {
     setToast(msg);
     clearTimeout(toastRef.current);
     toastRef.current = setTimeout(() => setToast(null), dur);
+  }, []);
+
+  const showWelcome = useCallback((clubName) => {
+    const name = formatClubName(clubName || "ZAP FC");
+    clearTimeout(welcomeRef.current);
+    setWelcomeBanner(`Welcome ${name}, nice to have you back.`);
+    welcomeRef.current = setTimeout(() => setWelcomeBanner(null), 3200);
   }, []);
 
   const markOnchainRegistered = useCallback((stateLike = S, registry = null, walletOverride = null) => {
@@ -386,10 +406,11 @@ export default function Zap() {
     return () => { cancelled = true; };
   }, []);
 
-  const routeForWallet = useCallback(async (wallet) => {
+  const routeForWallet = useCallback(async (wallet, options = {}) => {
     let { s, lb } = loadProfile(wallet);
+    const isWallet = wallet && wallet !== "local";
 
-    if (!s.clubCreated && wallet && wallet !== "local") {
+    if (isWallet) {
       const registry = await getPlayerRegistry(wallet);
       if (registry?.registered) {
         s = normalizeState({
@@ -397,6 +418,7 @@ export default function Zap() {
           wallet: wallet || "local",
           clubName: registry.clubName || s.clubName,
           clubCreated: true,
+          clubIdentitySet: true,
           onchainRegistered: true,
         });
         try { localStorage.setItem(stateKey(wallet), JSON.stringify(s)); } catch (_) {}
@@ -411,12 +433,19 @@ export default function Zap() {
     } else {
       setScreen("home");
     }
-  }, []);
+    if (options.welcome && isWallet) {
+      showWelcome(s.clubName || "ZAP FC");
+    }
+  }, [showWelcome]);
 
   useEffect(() => {
     if (!entering || !account || !provider) return;
     const id = window.setTimeout(() => {
-      routeForWallet(account.address || address).finally(() => setEntering(false));
+      setProfileSyncing(true);
+      routeForWallet(account.address || address, { welcome:true }).finally(() => {
+        setEntering(false);
+        setProfileSyncing(false);
+      });
     }, 0);
     return () => window.clearTimeout(id);
   }, [account, address, entering, provider, routeForWallet]);
@@ -428,12 +457,19 @@ export default function Zap() {
     try {
       const walletSession = account && provider
         ? { account, provider, address:account.address || address }
-        : await connect();
-      await routeForWallet(walletSession?.account?.address || walletSession?.address || account?.address || address || "local");
+        : await withTimeout(connect(), ENTER_CONNECT_TIMEOUT_MS, "Wallet connection timed out");
+      const wallet = walletSession?.account?.address || walletSession?.address || account?.address || address;
+      setProfileSyncing(!!wallet && wallet !== "local");
+      await routeForWallet(wallet || "local", { welcome:!!wallet && wallet !== "local" });
       setEntering(false);
-    } catch {
-      showToast("Wallet login failed. Guest mode is still available.");
+      setProfileSyncing(false);
+    } catch (error) {
+      await routeForWallet("local");
+      showToast(error?.message === "Wallet connection timed out"
+        ? "Cartridge is taking too long. Entered local clubhouse for now."
+        : "Wallet login failed. Entered local clubhouse for now.");
       setEntering(false);
+      setProfileSyncing(false);
     }
   }, [account, address, connect, provider, routeForWallet, showToast]);
 
@@ -789,6 +825,60 @@ export default function Zap() {
         )}
 
         {toast && <Toast msg={toast}/>}
+        {welcomeBanner && (
+          <div style={{
+            position:"absolute",
+            top:"72px",
+            left:"50%",
+            transform:"translateX(-50%)",
+            zIndex:1000,
+            padding:"9px 14px",
+            borderRadius:"999px",
+            border:"1px solid rgba(84,232,113,.22)",
+            background:"rgba(2,10,6,.82)",
+            color:"rgba(238,245,240,.86)",
+            fontFamily:"var(--f-mono)",
+            fontSize:"9px",
+            letterSpacing:".12em",
+            textTransform:"uppercase",
+            boxShadow:"0 16px 38px rgba(0,0,0,.3),0 0 22px rgba(34,197,94,.12)",
+            backdropFilter:"blur(12px)",
+            pointerEvents:"none",
+            animation:"flashIn .22s ease",
+            whiteSpace:"nowrap",
+          }}>{welcomeBanner}</div>
+        )}
+        {profileSyncing && (
+          <div style={{
+            position:"absolute",
+            inset:0,
+            zIndex:999,
+            display:"grid",
+            placeItems:"center",
+            background:"rgba(1,5,3,.72)",
+            backdropFilter:"blur(5px)",
+            pointerEvents:"auto",
+          }}>
+            <div style={{ display:"grid", justifyItems:"center", gap:"14px" }}>
+              <div style={{
+                width:"42px",
+                height:"42px",
+                borderRadius:"50%",
+                border:"2px solid rgba(84,232,113,.18)",
+                borderTopColor:"#54e871",
+                animation:"spin .8s linear infinite",
+                boxShadow:"0 0 22px rgba(84,232,113,.18)",
+              }}/>
+              <div style={{
+                fontFamily:"var(--f-mono)",
+                fontSize:"9px",
+                letterSpacing:".18em",
+                color:"rgba(238,245,240,.72)",
+                textTransform:"uppercase",
+              }}>Syncing clubhouse profile</div>
+            </div>
+          </div>
+        )}
         {clubPrompt && (
           <ClubIdentityModal
             initialName=""
