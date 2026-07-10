@@ -7,13 +7,26 @@ const rawToriiUrl = env.VITE_TORII_URL || "";
 const deprecatedZapKatana =
   rawRpcUrl.includes("/x/zapfc/katana") ||
   rawToriiUrl.includes("/x/zapfc/torii");
-const CHAIN_PROFILE = (deprecatedZapKatana
+const rawChainProfile = (env.VITE_CHAIN_PROFILE || env.VITE_CHAIN || "sepolia").toLowerCase();
+const rawDojoProfile = (env.VITE_DOJO_PROFILE || env.VITE_NETWORK || "").toLowerCase();
+const wantsCartridge = env.VITE_USE_CARTRIDGE
+  ? env.VITE_USE_CARTRIDGE === "true"
+  : true;
+const isLocalRpc = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/.test(rawRpcUrl);
+const allowKatanaController = env.VITE_ALLOW_KATANA_CONTROLLER === "true";
+const staleKatanaProfile =
+  ["katana", "slot", "wp_zapfc"].includes(rawChainProfile) ||
+  ["katana", "slot", "wp_zapfc"].includes(rawDojoProfile);
+const forceSepolia =
+  deprecatedZapKatana ||
+  (wantsCartridge && staleKatanaProfile && !isLocalRpc && !allowKatanaController);
+const CHAIN_PROFILE = (forceSepolia
   ? "sepolia"
-  : env.VITE_CHAIN_PROFILE || env.VITE_CHAIN || "sepolia").toLowerCase();
+  : rawChainProfile).toLowerCase();
 const DEFAULT_PROFILE = CHAIN_PROFILE === "sepolia" || CHAIN_PROFILE === "starknet-sepolia"
   ? "sepolia"
   : "katana";
-const PROFILE = (deprecatedZapKatana
+const PROFILE = (forceSepolia
   ? "sepolia"
   : env.VITE_DOJO_PROFILE || env.VITE_NETWORK || DEFAULT_PROFILE).toLowerCase();
 const manifests = {
@@ -42,17 +55,18 @@ export const WORLD_ADDRESS   = manifest.world.address;
 export const NAMESPACE       = "dojo_starter";
 export const DOJO_PROFILE    = PROFILE;
 export const IS_SEPOLIA      = isSepolia;
+export const FORCED_SEPOLIA  = forceSepolia;
 
 export const KATANA_CHAIN_ID = env.VITE_KATANA_CHAIN_ID || "0x57505f5a41504643";
 export const SEPOLIA_CHAIN_ID = "0x534e5f5345504f4c4941";
 export const CHAIN_ID = isSepolia ? SEPOLIA_CHAIN_ID : KATANA_CHAIN_ID;
 
-export const RPC_URL = deprecatedZapKatana ? "https://api.cartridge.gg/x/starknet/sepolia" : env.VITE_STARKNET_RPC_URL || (
+export const RPC_URL = forceSepolia ? "https://api.cartridge.gg/x/starknet/sepolia" : env.VITE_STARKNET_RPC_URL || (
   isSepolia
     ? "https://api.cartridge.gg/x/starknet/sepolia"
     : "http://localhost:5050"
 );
-export const TORII_URL = deprecatedZapKatana ? "https://api.cartridge.gg/x/starknet/sepolia/torii" : env.VITE_TORII_URL || (
+export const TORII_URL = forceSepolia ? "https://api.cartridge.gg/x/starknet/sepolia/torii" : env.VITE_TORII_URL || (
   isSepolia
     ? "https://api.cartridge.gg/x/starknet/sepolia/torii"
     : "http://localhost:8080"

@@ -9,9 +9,11 @@ import ControllerConnector from "@cartridge/connector/controller";
 import {
   CHAIN_ID,
   CONTRACTS,
+  FORCED_SEPOLIA,
   IS_SEPOLIA,
   KATANA_CHAIN_ID,
   RPC_URL,
+  SEPOLIA_CHAIN_ID,
   USE_CARTRIDGE,
 } from "./dojoConfig";
 
@@ -163,31 +165,82 @@ const provider = jsonRpcProvider({
   },
 });
 
+const SEPOLIA_URL = "https://api.cartridge.gg/x/starknet/sepolia";
+const MAINNET_URL = "https://api.cartridge.gg/x/starknet/mainnet";
+const STALE_CHAIN_NEEDLES = [
+  KATANA_CHAIN_ID,
+  "0x57505f5a41504643",
+  "WP_ZAPFC",
+  "wp_zapfc",
+];
+
+function clearStaleControllerChainSelection() {
+  if (typeof window === "undefined") return;
+
+  for (const storage of [window.localStorage, window.sessionStorage]) {
+    try {
+      for (let i = storage.length - 1; i >= 0; i -= 1) {
+        const key = storage.key(i);
+        if (!key) continue;
+
+        const value = storage.getItem(key) || "";
+        const lowerKey = key.toLowerCase();
+        const lowerValue = value.toLowerCase();
+        const isControllerKey =
+          lowerKey.includes("cartridge") ||
+          lowerKey.includes("controller") ||
+          lowerKey.includes("starknet");
+        const hasStaleChain = STALE_CHAIN_NEEDLES.some((needle) => {
+          const lowerNeedle = needle.toLowerCase();
+          return lowerKey.includes(lowerNeedle) || lowerValue.includes(lowerNeedle);
+        });
+
+        if (isControllerKey && hasStaleChain) {
+          storage.removeItem(key);
+        }
+      }
+    } catch {
+      // Storage can be unavailable in locked-down browsers; the connector still
+      // receives the corrected default chain below.
+    }
+  }
+}
+
+if (IS_SEPOLIA || FORCED_SEPOLIA) {
+  clearStaleControllerChainSelection();
+}
+
 // ── Controller Connector (Created outside React) ───────────────────────────────
 // This must be created once at module level, not inside components
-const controllerChains = [
-  { rpcUrl: KATANA_URL },
-  { rpcUrl: "https://api.cartridge.gg/x/starknet/sepolia" },
-  { rpcUrl: "https://api.cartridge.gg/x/starknet/mainnet" },
-];
+const activeChainId = IS_SEPOLIA ? SEPOLIA_CHAIN_ID : CHAIN_ID;
+const activeChain = IS_SEPOLIA ? sepolia : katana;
+const configuredChains = IS_SEPOLIA ? [sepolia, mainnet] : [katana, sepolia, mainnet];
+const controllerChains = IS_SEPOLIA
+  ? [
+      { rpcUrl: SEPOLIA_URL },
+      { rpcUrl: MAINNET_URL },
+    ]
+  : [
+      { rpcUrl: KATANA_URL },
+      { rpcUrl: SEPOLIA_URL },
+      { rpcUrl: MAINNET_URL },
+    ];
 
 const connector = new ControllerConnector({
   chains: controllerChains,
-  defaultChainId: CHAIN_ID,
+  defaultChainId: activeChainId,
   policies: USE_CARTRIDGE ? policies : undefined,
   rpcUrl: RPC_URL,
   shouldOverridePresetPolicies: true,
 });
-
-const activeChain = IS_SEPOLIA ? sepolia : katana;
 
 // ── Starknet Provider Wrapper ─────────────────────────────────────────────────
 export function StarknetProvider({ children }) {
   return (
     <StarknetConfig
       autoConnect={USE_CARTRIDGE}
-      defaultChainId={BigInt(CHAIN_ID)}
-      chains={[katana, sepolia, mainnet]}
+      defaultChainId={BigInt(activeChainId)}
+      chains={configuredChains}
       provider={provider}
       connectors={[connector]}
       initialChain={activeChain}
