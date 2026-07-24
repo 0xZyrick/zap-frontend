@@ -505,12 +505,20 @@ export async function waitForSessionResolution(provider, sessionId, previousSess
  */
 export async function registerPlayer(account, clubName) {
   try {
-    return await account.execute({
+    console.log("registerPlayer executing with clubName:", clubName, "account:", account?.address);
+    const tx = await account.execute({
       contractAddress: CONTRACTS.player_actions,
       entrypoint: "register_player",
       calldata: [toFelt(clubName)],
     });
+    console.log("registerPlayer response tx:", tx);
+    return tx;
   } catch (e) {
+    console.error("registerPlayer failed with error:", e, {
+      message: e?.message,
+      stack: e?.stack,
+      response: e?.response,
+    });
     if (isAlreadyRegisteredError(e)) {
       return { alreadyRegistered: true };
     }

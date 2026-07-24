@@ -436,6 +436,7 @@ export default function Zap() {
       try {
         tx = await registerPlayer(activeAccount, clubName);
       } catch (error) {
+        console.error("ensureRegistered -> registerPlayer error:", error);
         if (!isAlreadyRegisteredError(error)) throw error;
         const confirmedRegistry = await fetchRegistryWithRetry(wallet, 6);
         markOnchainRegistered(stateLike, confirmedRegistry, wallet);
@@ -630,13 +631,14 @@ export default function Zap() {
         showWelcome(finalState.clubName, "new");
         trackClubCreated();
       } catch (error) {
+        console.error("handleCreateClub error:", error);
         if (isAlreadyRegisteredError(error)) {
           const registry = await fetchRegistryWithRetry(walletAddress, 6);
           const finalState = markOnchainRegistered(ns, registry, walletAddress);
           setScreen(TRAINING_MODE_ENABLED && !finalState.trainingDone ? "training" : "home");
           showWelcome(finalState.clubName, "back");
         } else {
-          showToast("Could not create club on-chain. Please try again.");
+          showToast(`Could not create club on-chain: ${error?.message || "Check console"}`);
         }
       } finally {
         setProfileSyncing(false);
@@ -705,12 +707,13 @@ export default function Zap() {
       await ensureRegistered(formattedName, ns, walletSession);
       showToast("Club saved to wallet.");
     } catch (error) {
+      console.error("handleSaveClubIdentity error:", error);
       if (isAlreadyRegisteredError(error)) {
         const registry = await fetchRegistryWithRetry(walletAddress, 6);
         markOnchainRegistered(ns, registry, walletAddress);
         showToast("Wallet club already exists. Synced profile.");
       } else {
-        showToast("Saved locally. On-chain claim can wait.");
+        showToast(`Saved locally. On-chain error: ${error?.message || "Check console"}`);
       }
     }
     setSavingClub(false);
@@ -746,7 +749,8 @@ export default function Zap() {
         await ensureRegistered(ns.clubName || "ZAP", ns);
         const feltId = FORMATION_FELT[playableFormationId];
         if (feltId) await dojo.doSetFormation(feltId);
-      } catch {
+      } catch (error) {
+        console.error("launchGame on-chain sync error:", error);
         // Non-blocking: match can still run with client fallback if chain setup is unavailable.
       }
     }

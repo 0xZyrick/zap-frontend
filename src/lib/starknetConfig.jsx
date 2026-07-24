@@ -34,7 +34,7 @@ const sepolia = {
     public: { http: [RPC_URL] },
   },
   paymasterRpcUrls: {
-    avnu: { http: [RPC_URL] },
+    avnu: { http: ["https://sepolia.paymaster.avnu.fi/"] },
   },
 };
 
@@ -54,7 +54,7 @@ const mainnet = {
     public: { http: ["https://api.cartridge.gg/x/starknet/mainnet"] },
   },
   paymasterRpcUrls: {
-    avnu: { http: ["https://api.cartridge.gg/x/starknet/mainnet"] },
+    avnu: { http: ["https://starknet.paymaster.avnu.fi/"] },
   },
 };
 
