@@ -5,7 +5,7 @@
 //  executes the call, and returns the tx hash.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { shortString } from "starknet";
+import { hash, num, shortString } from "starknet";
 import { CONTRACTS, TORII_URL, USE_DEV_RESOLVE } from "./dojoConfig";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -17,6 +17,8 @@ const ZERO_ADDRESS = "0x0";
 const NO_PENDING_ACTION = 255;
 const STATUS_ACTIVE = 0;
 const sessionCursorKey = () => `zapfc:lastSessionId:${CONTRACTS.game_actions}`;
+const pvpSessionCursorKey = () => `zapfc:lastPvpSessionId:${CONTRACTS.pvp_actions || "none"}`;
+const STARK_FIELD_PRIME = BigInt("0x800000000000011000000000000000000000000000000000000000000000001");
 
 const asBigInt = (value) => {
   try {
@@ -33,7 +35,49 @@ const sameAddress = (a, b) => {
   return aa !== null && bb !== null && aa === bb;
 };
 
-const toriiGraphqlUrl = () => `${String(TORII_URL || "").replace(/\/$/, "")}/graphql`;
+const normalizeFelt = (value) => {
+  const felt = asBigInt(value);
+  if (felt === null) throw new Error(`Invalid felt value: ${String(value)}`);
+  const normalized = ((felt % STARK_FIELD_PRIME) + STARK_FIELD_PRIME) % STARK_FIELD_PRIME;
+  return normalized;
+};
+
+const feltHex = (value) => num.toHex(normalizeFelt(value));
+
+export const makePvpSalt = () => {
+  const bytes = new Uint8Array(31);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < bytes.length; i += 1) {
+      bytes[i] = Math.floor(Math.random() * 256);
+    }
+  }
+  let value = 0n;
+  for (const byte of bytes) value = (value << 8n) + BigInt(byte);
+  if (value === 0n) value = BigInt(Date.now());
+  return feltHex(value);
+};
+
+export const computePvpCommitHash = ({
+  action,
+  salt,
+  playerAddress,
+  sessionId,
+  turnNumber,
+}) => hash.computePoseidonHashOnElements([
+  feltHex(action),
+  feltHex(salt),
+  feltHex(playerAddress),
+  feltHex(sessionId),
+  feltHex(turnNumber),
+]);
+
+const toriiGraphqlUrl = () => (
+  import.meta.env.DEV
+    ? "/torii/graphql"
+    : `${String(TORII_URL || "").replace(/\/$/, "")}/graphql`
+);
 
 const decodeFeltString = (value) => {
   try {
@@ -64,6 +108,20 @@ const rememberedSessionId = () => {
   }
 };
 
+const rememberPvpSessionId = (sessionId) => {
+  try {
+    if (sessionId) localStorage.setItem(pvpSessionCursorKey(), sessionId.toString());
+  } catch {}
+};
+
+const rememberedPvpSessionId = () => {
+  try {
+    return Number(localStorage.getItem(pvpSessionCursorKey()) || 0);
+  } catch {
+    return 0;
+  }
+};
+
 const eventValues = (receipt) => {
   const out = [];
   for (const event of receipt?.events || []) {
@@ -85,7 +143,7 @@ export async function getPlayerRegistry(walletAddress) {
       body: JSON.stringify({
         query: `
           query PlayerRegistry($wallet: ContractAddress!) {
-            dojoStarterPlayerRegistryModels(first: 1, where: { walletEQ: $wallet }) {
+            zapfcPlayerRegistryModels(first: 1, where: { walletEQ: $wallet }) {
               edges {
                 node {
                   wallet
@@ -114,7 +172,7 @@ export async function getPlayerRegistry(walletAddress) {
       throw new Error(payload.errors.map((err) => err.message).join("; "));
     }
 
-    const node = payload?.data?.dojoStarterPlayerRegistryModels?.edges?.[0]?.node || null;
+    const node = payload?.data?.zapfcPlayerRegistryModels?.edges?.[0]?.node || null;
     return node ? { ...node, clubName: decodeFeltString(node.club_name) } : null;
   } catch {
     return null;
@@ -131,7 +189,7 @@ export async function getGlobalLeaderboard(limit = 50) {
       body: JSON.stringify({
         query: `
           query GlobalLeaderboard($first: Int!) {
-            dojoStarterPlayerRegistryModels(first: $first) {
+            zapfcPlayerRegistryModels(first: $first) {
               edges {
                 node {
                   wallet
@@ -161,7 +219,7 @@ export async function getGlobalLeaderboard(limit = 50) {
       throw new Error(payload.errors.map((err) => err.message).join("; "));
     }
 
-    return (payload?.data?.dojoStarterPlayerRegistryModels?.edges || [])
+    return (payload?.data?.zapfcPlayerRegistryModels?.edges || [])
       .filter((edge) => !!edge?.node?.registered)
       .map((edge, index) => {
         const node = edge?.node || {};
@@ -185,6 +243,74 @@ export async function getGlobalLeaderboard(limit = 50) {
       .map((entry, index) => ({ ...entry, rank: index + 1 }));
   } catch {
     return [];
+  }
+}
+
+const pvpSessionFromNode = (node) => {
+  if (!node?.session_id) return null;
+  const sessionId = asBigInt(node.session_id);
+  if (!sessionId) return null;
+
+  return {
+    sessionId,
+    home: node.home,
+    away: node.away,
+    lobbyStatus: Number(node.lobby_status || 0),
+    state: BigInt(node.state || 0),
+    turnStage: Number(node.turn_stage || 0),
+    turnDeadline: BigInt(node.turn_deadline || 0),
+    createdAt: BigInt(node.created_at || 0),
+    stateFields: unpackState(node.state || 0),
+  };
+};
+
+async function getLatestPvpSessionForHome(homeAddress, options = {}) {
+  if (!homeAddress || !TORII_URL) return null;
+  const afterSessionId = BigInt(options.afterSessionId || 0);
+
+  try {
+    const response = await fetch(toriiGraphqlUrl(), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: `
+          query LatestPvpSession($home: ContractAddress!) {
+            zapfcPvpSessionModels(first: 50, where: { homeEQ: $home }) {
+              edges {
+                node {
+                  session_id
+                  home
+                  away
+                  lobby_status
+                  state
+                  turn_stage
+                  turn_deadline
+                  created_at
+                }
+              }
+            }
+          }
+        `,
+        variables: { home: homeAddress },
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Torii PVP query failed: ${response.status}`);
+    const payload = await response.json();
+    if (payload?.errors?.length) {
+      throw new Error(payload.errors.map((err) => err.message).join("; "));
+    }
+
+    return (payload?.data?.zapfcPvpSessionModels?.edges || [])
+      .map((edge) => pvpSessionFromNode(edge?.node))
+      .filter((session) => (
+        session &&
+        session.sessionId > afterSessionId &&
+        sameAddress(session.home, homeAddress)
+      ))
+      .sort((a, b) => (a.sessionId > b.sessionId ? -1 : a.sessionId < b.sessionId ? 1 : 0))[0] || null;
+  } catch {
+    return null;
   }
 }
 
@@ -238,6 +364,44 @@ const findLatestSessionId = async (provider, playerAddress, receipt, options = {
   return latest;
 };
 
+const validatePvpSession = async (provider, sessionId, playerAddress, options = {}) => {
+  if (!sessionId || sessionId <= 0n) return null;
+  const session = await getPvpSession(provider, sessionId);
+  if (!session || session.sessionId !== sessionId) return null;
+
+  const matchesHome = sameAddress(session.home, playerAddress);
+  const matchesAway = sameAddress(session.away, playerAddress);
+  if (options.role === "home" && !matchesHome) return null;
+  if (options.role === "away" && !matchesAway) return null;
+  if (!options.role && !matchesHome && !matchesAway) return null;
+
+  rememberPvpSessionId(sessionId);
+  return sessionId;
+};
+
+const findLatestPvpSessionId = async (provider, playerAddress, receipt, options = {}) => {
+  const minSessionId = BigInt(options.afterSessionId || 0);
+  const likelyIds = eventValues(receipt)
+    .map(asBigInt)
+    .filter((value) => value && value > 0n && value <= 1_000_000n)
+    .sort((a, b) => (a > b ? -1 : a < b ? 1 : 0));
+
+  for (const id of [...new Set(likelyIds.map((id) => id.toString()))].map(BigInt)) {
+    const valid = await validatePvpSession(provider, id, playerAddress, options);
+    if (valid) return valid;
+  }
+
+  const cursor = Math.max(Number(minSessionId), rememberedPvpSessionId(), 0);
+  const start = Math.max(cursor - 256, 1);
+  const end = cursor + 512;
+  let latest = null;
+  for (let id = start; id <= end; id += 1) {
+    const valid = await validatePvpSession(provider, BigInt(id), playerAddress, options);
+    if (valid) latest = valid;
+  }
+  return latest;
+};
+
 /** Read a game session from the world via a view call. */
 export async function getSession(provider, sessionId) {
   if (!provider || !sessionId) return null;
@@ -255,6 +419,31 @@ export async function getSession(provider, sessionId) {
       state:        BigInt(result[3]),
       statsPacked:  Number(result[4]),
       vrfRequestId: BigInt(result[5]),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Read a PVP session from the PVP action contract. */
+export async function getPvpSession(provider, sessionId) {
+  if (!provider || !sessionId || !CONTRACTS.pvp_actions) return null;
+  try {
+    const result = await provider.callContract({
+      contractAddress: CONTRACTS.pvp_actions,
+      entrypoint: "get_session",
+      calldata: [String(sessionId)],
+    });
+    return {
+      sessionId:    BigInt(result[0]),
+      home:         result[1],
+      away:         result[2],
+      lobbyStatus:  Number(result[3]),
+      state:        BigInt(result[4]),
+      turnStage:    Number(result[5]),
+      turnDeadline: BigInt(result[6]),
+      createdAt:    BigInt(result[7]),
+      stateFields:  unpackState(result[4]),
     };
   } catch {
     return null;
@@ -432,6 +621,141 @@ export async function claimGameReward(account, sessionId) {
     entrypoint: "claim_game_reward",
     calldata: [String(sessionId)],
   });
+}
+
+// ── PvpActions ────────────────────────────────────────────────────────────────
+
+const requirePvpContract = () => {
+  if (!CONTRACTS.pvp_actions) throw new Error("PVP contract missing from manifest");
+};
+
+export async function createPvpRoom(account, provider) {
+  if (!account) throw new Error("No account for createPvpRoom");
+  if (!provider) throw new Error("No provider for createPvpRoom");
+  requirePvpContract();
+
+  const afterSessionId = rememberedPvpSessionId();
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.pvp_actions,
+    entrypoint: "create_room",
+    calldata: [],
+  });
+  const receipt = await waitForTx(provider, tx.transaction_hash);
+  let sessionId = await findLatestPvpSessionId(provider, account.address, receipt, {
+    afterSessionId,
+    role: "home",
+  });
+
+  let indexedSession = null;
+  for (let attempt = 0; !sessionId && attempt < 8; attempt += 1) {
+    if (attempt > 0) await sleep(750);
+    indexedSession = await getLatestPvpSessionForHome(account.address, { afterSessionId });
+    if (indexedSession?.sessionId) {
+      sessionId = indexedSession.sessionId;
+      rememberPvpSessionId(sessionId);
+    }
+  }
+
+  if (!sessionId) {
+    throw new Error(`PVP room created, but no session id was found. Tx: ${tx.transaction_hash}`);
+  }
+  return {
+    txHash: tx.transaction_hash,
+    sessionId,
+    session: await getPvpSession(provider, sessionId) || indexedSession,
+  };
+}
+
+export async function joinPvpRoom(account, provider, sessionId) {
+  if (!account) throw new Error("No account for joinPvpRoom");
+  if (!provider) throw new Error("No provider for joinPvpRoom");
+  requirePvpContract();
+
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.pvp_actions,
+    entrypoint: "join_room",
+    calldata: [String(sessionId)],
+  });
+  await waitForTx(provider, tx.transaction_hash);
+  rememberPvpSessionId(sessionId);
+  return { txHash: tx.transaction_hash, session: await getPvpSession(provider, sessionId) };
+}
+
+export async function cancelPvpRoom(account, provider, sessionId) {
+  if (!account) throw new Error("No account for cancelPvpRoom");
+  requirePvpContract();
+
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.pvp_actions,
+    entrypoint: "cancel_room",
+    calldata: [String(sessionId)],
+  });
+  await waitForTx(provider, tx.transaction_hash);
+  return { txHash: tx.transaction_hash, session: await getPvpSession(provider, sessionId) };
+}
+
+export async function commitPvpTurn(account, provider, sessionId, action, salt, turnNumber) {
+  if (!account) throw new Error("No account for commitPvpTurn");
+  requirePvpContract();
+
+  const commitHash = computePvpCommitHash({
+    action,
+    salt,
+    playerAddress: account.address,
+    sessionId,
+    turnNumber,
+  });
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.pvp_actions,
+    entrypoint: "commit_turn",
+    calldata: [String(sessionId), commitHash],
+  });
+  await waitForTx(provider, tx.transaction_hash);
+  return {
+    txHash: tx.transaction_hash,
+    commitHash,
+    salt: feltHex(salt),
+    session: await getPvpSession(provider, sessionId),
+  };
+}
+
+export async function revealPvpTurn(account, provider, sessionId, action, salt) {
+  if (!account) throw new Error("No account for revealPvpTurn");
+  requirePvpContract();
+
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.pvp_actions,
+    entrypoint: "reveal_turn",
+    calldata: [String(sessionId), String(action), feltHex(salt)],
+  });
+  await waitForTx(provider, tx.transaction_hash);
+  return { txHash: tx.transaction_hash, session: await getPvpSession(provider, sessionId) };
+}
+
+export async function continuePvpAfterHalftime(account, provider, sessionId) {
+  if (!account) throw new Error("No account for continuePvpAfterHalftime");
+  requirePvpContract();
+
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.pvp_actions,
+    entrypoint: "continue_after_halftime",
+    calldata: [String(sessionId)],
+  });
+  await waitForTx(provider, tx.transaction_hash);
+  return { txHash: tx.transaction_hash, session: await getPvpSession(provider, sessionId) };
+}
+
+export async function claimPvpTimeout(account, provider, sessionId) {
+  if (!account) throw new Error("No account for claimPvpTimeout");
+  requirePvpContract();
+
+  const tx = await account.execute({
+    contractAddress: CONTRACTS.pvp_actions,
+    entrypoint: "claim_timeout",
+    calldata: [String(sessionId)],
+  });
+  await waitForTx(provider, tx.transaction_hash);
+  return { txHash: tx.transaction_hash, session: await getPvpSession(provider, sessionId) };
 }
 
 // ── MarketActions ─────────────────────────────────────────────────────────────

@@ -4,8 +4,8 @@
 //  for gas-less game actions.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { StarknetConfig, jsonRpcProvider, cartridge } from "@starknet-react/core";
-import ControllerConnector from "@cartridge/connector/controller";
+import { StarknetConfig, argent, braavos, jsonRpcProvider, cartridge } from "@starknet-react/core";
+import { ControllerConnector } from "@cartridge/connector";
 import {
   CHAIN_ID,
   CONTRACTS,
@@ -30,8 +30,11 @@ const sepolia = {
     decimals: 18,
   },
   rpcUrls: {
-    default: { http: ["https://api.cartridge.gg/x/starknet/sepolia"] },
-    public: { http: ["https://api.cartridge.gg/x/starknet/sepolia"] },
+    default: { http: [RPC_URL] },
+    public: { http: [RPC_URL] },
+  },
+  paymasterRpcUrls: {
+    avnu: { http: [RPC_URL] },
   },
 };
 
@@ -49,6 +52,9 @@ const mainnet = {
   rpcUrls: {
     default: { http: ["https://api.cartridge.gg/x/starknet/mainnet"] },
     public: { http: ["https://api.cartridge.gg/x/starknet/mainnet"] },
+  },
+  paymasterRpcUrls: {
+    avnu: { http: ["https://api.cartridge.gg/x/starknet/mainnet"] },
   },
 };
 
@@ -146,6 +152,47 @@ const policies = {
         },
       ],
     },
+    ...(CONTRACTS.pvp_actions ? {
+      [CONTRACTS.pvp_actions]: {
+        methods: [
+          {
+            name: "create_room",
+            entrypoint: "create_room",
+            description: "Create a PVP room",
+          },
+          {
+            name: "join_room",
+            entrypoint: "join_room",
+            description: "Join a PVP room",
+          },
+          {
+            name: "cancel_room",
+            entrypoint: "cancel_room",
+            description: "Cancel an open PVP room",
+          },
+          {
+            name: "commit_turn",
+            entrypoint: "commit_turn",
+            description: "Commit a hidden PVP action",
+          },
+          {
+            name: "reveal_turn",
+            entrypoint: "reveal_turn",
+            description: "Reveal a committed PVP action",
+          },
+          {
+            name: "continue_after_halftime",
+            entrypoint: "continue_after_halftime",
+            description: "Continue a PVP match after halftime",
+          },
+          {
+            name: "claim_timeout",
+            entrypoint: "claim_timeout",
+            description: "Resolve a stalled PVP turn",
+          },
+        ],
+      },
+    } : {}),
   },
 };
 
@@ -156,7 +203,7 @@ const provider = jsonRpcProvider({
       return { nodeUrl: KATANA_URL, blockIdentifier: "latest" };
     }
     if (chain?.id === sepolia.id) {
-      return { nodeUrl: "https://api.cartridge.gg/x/starknet/sepolia" };
+      return { nodeUrl: RPC_URL };
     }
     if (chain?.id === mainnet.id) {
       return { nodeUrl: "https://api.cartridge.gg/x/starknet/mainnet" };
@@ -165,8 +212,8 @@ const provider = jsonRpcProvider({
   },
 });
 
-const SEPOLIA_URL = "https://api.cartridge.gg/x/starknet/sepolia";
-const MAINNET_URL = "https://api.cartridge.gg/x/starknet/mainnet";
+const SEPOLIA_URL = RPC_URL;
+const MAINNET_URL = "https://api.cartridge.gg/x/starknet/mainnet/rpc/v0_9";
 const STALE_CHAIN_NEEDLES = [
   KATANA_CHAIN_ID,
   "0x57505f5a41504643",
@@ -210,39 +257,32 @@ if (IS_SEPOLIA || FORCED_SEPOLIA) {
   clearStaleControllerChainSelection();
 }
 
-// ── Controller Connector (Created outside React) ───────────────────────────────
-// This must be created once at module level, not inside components
+// ── Fresh Cartridge Connector ────────────────────────────────────────────────
+// Created once from the current zapfc Sepolia manifest addresses.
 const activeChainId = IS_SEPOLIA ? SEPOLIA_CHAIN_ID : CHAIN_ID;
 const activeChain = IS_SEPOLIA ? sepolia : katana;
 const configuredChains = IS_SEPOLIA ? [sepolia, mainnet] : [katana, sepolia, mainnet];
-const controllerChains = IS_SEPOLIA
-  ? [
-      { rpcUrl: SEPOLIA_URL },
-      { rpcUrl: MAINNET_URL },
-    ]
-  : [
-      { rpcUrl: KATANA_URL },
-      { rpcUrl: SEPOLIA_URL },
-      { rpcUrl: MAINNET_URL },
-    ];
-
-const connector = new ControllerConnector({
-  chains: controllerChains,
+const cartridgeConnector = new ControllerConnector({
+  policies,
   defaultChainId: activeChainId,
-  policies: USE_CARTRIDGE ? policies : undefined,
-  rpcUrl: RPC_URL,
-  shouldOverridePresetPolicies: true,
+  chains: configuredChains.map((chain) => ({
+    rpcUrl: chain.rpcUrls.default.http[0],
+  })),
+  errorDisplayMode: "notification",
+  propagateSessionErrors: true,
+  lazyload: true,
 });
+const readyConnectors = [cartridgeConnector, argent(), braavos()];
 
 // ── Starknet Provider Wrapper ─────────────────────────────────────────────────
 export function StarknetProvider({ children }) {
   return (
     <StarknetConfig
-      autoConnect={USE_CARTRIDGE}
+      autoConnect={false}
       defaultChainId={BigInt(activeChainId)}
       chains={configuredChains}
       provider={provider}
-      connectors={[connector]}
+      connectors={readyConnectors}
       initialChain={activeChain}
       explorer={cartridge}
     >

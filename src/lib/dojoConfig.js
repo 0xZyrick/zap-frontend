@@ -40,6 +40,15 @@ const manifests = {
 const manifest = manifests[PROFILE] || manifestSepolia;
 const isSepolia = CHAIN_PROFILE === "sepolia" || CHAIN_PROFILE === "starknet-sepolia";
 const isLocalProfile = PROFILE === "dev" || PROFILE === "local" || PROFILE === "katana";
+const CARTRIDGE_SEPOLIA_RPC = "https://api.cartridge.gg/x/starknet/sepolia/rpc/v0_9";
+
+const normalizeRpcUrl = (url) => {
+  const trimmed = String(url || "").replace(/\/$/, "");
+  if (trimmed === "https://api.cartridge.gg/x/starknet/sepolia") {
+    return CARTRIDGE_SEPOLIA_RPC;
+  }
+  return trimmed;
+};
 
 const byTag = Object.fromEntries(
   (manifest.contracts || []).map((c) => [c.tag, c.address])
@@ -52,7 +61,7 @@ const requireAddress = (tag) => {
 
 export const DOJO_MANIFEST   = manifest;
 export const WORLD_ADDRESS   = manifest.world.address;
-export const NAMESPACE       = "dojo_starter";
+export const NAMESPACE       = "zapfc";
 export const DOJO_PROFILE    = PROFILE;
 export const IS_SEPOLIA      = isSepolia;
 export const FORCED_SEPOLIA  = forceSepolia;
@@ -61,11 +70,11 @@ export const KATANA_CHAIN_ID = env.VITE_KATANA_CHAIN_ID || "0x57505f5a41504643";
 export const SEPOLIA_CHAIN_ID = "0x534e5f5345504f4c4941";
 export const CHAIN_ID = isSepolia ? SEPOLIA_CHAIN_ID : KATANA_CHAIN_ID;
 
-export const RPC_URL = forceSepolia ? "https://api.cartridge.gg/x/starknet/sepolia" : env.VITE_STARKNET_RPC_URL || (
+export const RPC_URL = normalizeRpcUrl(forceSepolia ? CARTRIDGE_SEPOLIA_RPC : env.VITE_STARKNET_RPC_URL || (
   isSepolia
-    ? "https://api.cartridge.gg/x/starknet/sepolia"
+    ? CARTRIDGE_SEPOLIA_RPC
     : "http://localhost:5050"
-);
+));
 export const TORII_URL = forceSepolia ? "https://api.cartridge.gg/x/starknet/sepolia/torii" : env.VITE_TORII_URL || (
   isSepolia
     ? "https://api.cartridge.gg/x/starknet/sepolia/torii"
@@ -78,17 +87,20 @@ export const USE_DEV_RESOLVE = env.VITE_USE_DEV_RESOLVE
   ? env.VITE_USE_DEV_RESOLVE === "true"
   : !isSepolia;
 
-const GAME_ACTIONS_ADDRESS   = requireAddress("dojo_starter-game_actions");
-const MARKET_ACTIONS_ADDRESS = requireAddress("dojo_starter-market_actions");
-const PLAYER_ACTIONS_ADDRESS = requireAddress("dojo_starter-player_actions");
+const GAME_ACTIONS_ADDRESS   = requireAddress("zapfc-game_actions");
+const MARKET_ACTIONS_ADDRESS = requireAddress("zapfc-market_actions");
+const PLAYER_ACTIONS_ADDRESS = requireAddress("zapfc-player_actions");
+const PVP_ACTIONS_ADDRESS    = byTag["zapfc-pvp_actions"] || null;
 
 export const CONTRACTS = {
   game_actions:                 GAME_ACTIONS_ADDRESS,
   market_actions:               MARKET_ACTIONS_ADDRESS,
   player_actions:               PLAYER_ACTIONS_ADDRESS,
+  pvp_actions:                  PVP_ACTIONS_ADDRESS,
   dojo_starter_game_actions:    GAME_ACTIONS_ADDRESS,
   dojo_starter_market_actions:  MARKET_ACTIONS_ADDRESS,
   dojo_starter_player_actions:  PLAYER_ACTIONS_ADDRESS,
+  dojo_starter_pvp_actions:     PVP_ACTIONS_ADDRESS,
 };
 
 // Slot-hosted Katana prefunded account

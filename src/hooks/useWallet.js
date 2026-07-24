@@ -9,9 +9,22 @@ export function useWallet() {
   const { provider: starknetProvider } = useProvider();
   const { disconnect: disconnectStarknet } = useDisconnect();
 
-  const connector = useMemo(() => connectors.find((c) => c.id?.includes("controller")), [connectors]);
+  const readyConnector = useMemo(
+    () => connectors.find((c) => {
+      const id = `${c.id || ""} ${c.name || ""}`.toLowerCase();
+      return !id.includes("controller") && !id.includes("cartridge") && c.available?.() !== false;
+    }),
+    [connectors],
+  );
+  const cartridgeConnector = useMemo(
+    () => connectors.find((c) => {
+      const id = `${c.id || ""} ${c.name || ""}`.toLowerCase();
+      return id.includes("controller") || id.includes("cartridge");
+    }),
+    [connectors],
+  );
 
-  const connect_wallet = async () => {
+  const connect_wallet = async (mode = "cartridge") => {
     // Dev mode — return prefunded Katana account directly, no Controller needed
     if (!USE_CARTRIDGE) {
       return { account: devAccount, provider: devProvider, address: devAccount.address };
@@ -19,13 +32,29 @@ export function useWallet() {
     if (isConnected && starknetAccount && starknetProvider) {
       return { account: starknetAccount, provider: starknetProvider, address };
     }
-    if (!connector) throw new Error("No Cartridge Controller connector available");
-    const result = await connectAsync({ connector });
+    const connector = mode === "ready" ? readyConnector : cartridgeConnector;
+    if (!connector && mode === "ready") throw new Error("Install Argent X or Braavos to use Ready wallet.");
+    if (!connector) throw new Error("Cartridge Controller is not available. Try Ready wallet.");
+    await connectAsync({ connector });
+    let connectedAddress = null;
+    try {
+      const accounts = await connector.request?.({
+        type: "wallet_requestAccounts",
+        params: { silent_mode: true },
+      });
+      connectedAddress = accounts?.[0] || null;
+    } catch {}
+    const account = await connector.account(starknetProvider);
+    const provider = account?.provider || starknetProvider;
+    const walletAddress = account?.address || connectedAddress || address;
+    if (!account || !walletAddress) {
+      throw new Error("Wallet connection did not return an address");
+    }
     return {
       connected: true,
-      account: result?.account || starknetAccount,
-      provider: starknetProvider,
-      address: result?.account?.address || address,
+      account,
+      provider,
+      address: walletAddress,
     };
   };
 
@@ -43,5 +72,7 @@ export function useWallet() {
     connect:    connect_wallet,
     isConnected: isConnected,
     disconnect: disconnectStarknet,
+    hasReadyWallet: !!readyConnector,
+    hasCartridgeWallet: !!cartridgeConnector,
   };
 }

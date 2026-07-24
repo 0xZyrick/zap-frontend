@@ -23,6 +23,7 @@ import { trackTurnPlayed, trackHalftimeReached, trackMatchCompleted } from "../l
 
 const TURNS_PER_HALF = 10;
 const MAX_TURNS = TURNS_PER_HALF * 2;
+const ACTION_SELECT_SECONDS = 15;
 const STADIUM_SETUP_BG = "/assets/bg/stadium-setup-bg.png";
 const CHAIN_STATUS = {
   ACTIVE: 0,
@@ -47,6 +48,73 @@ const NEUTRAL_CAMERA = {
   transition: "transform 0.72s cubic-bezier(0.22,1,0.36,1)",
 };
 const distSq = (a, b) => ((a?.x ?? 0) - (b?.x ?? 0)) ** 2 + ((a?.y ?? 0) - (b?.y ?? 0)) ** 2;
+
+function ActionCountdown({ clock, isPvp }) {
+  if (!clock?.visible) return null;
+  const pct = clamp((clock.seconds / ACTION_SELECT_SECONDS) * 100, 0, 100);
+  const danger = clock.seconds <= 5;
+  return (
+    <div style={{
+      position:"absolute",
+      left:"50%",
+      bottom:"92px",
+      transform:"translateX(-50%)",
+      zIndex:27,
+      width:"min(360px, calc(100% - 44px))",
+      pointerEvents:"none",
+      opacity:clock.expired && !isPvp ? 0 : 1,
+      transition:"opacity .35s ease",
+    }}>
+      <div style={{
+        display:"grid",
+        gridTemplateColumns:"auto 1fr auto",
+        alignItems:"center",
+        gap:"10px",
+        padding:"8px 10px",
+        borderRadius:"999px",
+        border:`1px solid ${danger ? "rgba(248,113,113,.42)" : "rgba(84,232,113,.24)"}`,
+        background:"rgba(2,7,5,.76)",
+        boxShadow:`0 12px 30px rgba(0,0,0,.28), 0 0 20px ${danger ? "rgba(248,113,113,.16)" : "rgba(84,232,113,.12)"}`,
+        backdropFilter:"blur(12px)",
+      }}>
+        <span style={{
+          color:danger ? "#f87171" : "#bafc8a",
+          fontFamily:"var(--f-cond)",
+          fontSize:"18px",
+          fontWeight:900,
+          lineHeight:1,
+          minWidth:"30px",
+          textAlign:"center",
+        }}>{Math.max(0, clock.seconds)}</span>
+        <span style={{
+          height:"7px",
+          borderRadius:"999px",
+          overflow:"hidden",
+          background:"rgba(255,255,255,.08)",
+          border:"1px solid rgba(255,255,255,.06)",
+        }}>
+          <i style={{
+            display:"block",
+            width:`${pct}%`,
+            height:"100%",
+            borderRadius:"inherit",
+            background:danger ? "linear-gradient(90deg,#f97316,#ef4444)" : "linear-gradient(90deg,#54e871,#38bdf8)",
+            boxShadow:danger ? "0 0 16px rgba(248,113,113,.42)" : "0 0 16px rgba(84,232,113,.36)",
+            transition:"width .24s linear",
+          }} />
+        </span>
+        <span style={{
+          color:"rgba(238,245,240,.58)",
+          fontFamily:"var(--f-mono)",
+          fontSize:"7px",
+          letterSpacing:".16em",
+          textTransform:"uppercase",
+          whiteSpace:"nowrap",
+        }}>{isPvp ? "PVP CLOCK" : "READ CLOCK"}</span>
+      </div>
+    </div>
+  );
+}
 
 function getTurnContextLine({ score, gs, matchTime, momentum, midfieldSide }) {
   if (momentum === "in_form") return "IN FORM · THEY HAVEN'T READ YOU YET";
@@ -530,6 +598,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const postMatchNextRef = useRef(null);
   const chainRewardClaimedRef = useRef(false);
   const extraTimeRef = useRef(false);
+  const doActRef = useRef(null);
 
   // ── Derived formation info ───────────────────────────────────────────────
   const formation = getFormation(S.formationId);
@@ -560,6 +629,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const [tierOvl,     setTierOvl]     = useState(null);
   const [pauseOpen,   setPauseOpen]   = useState(false);
   const [matchFeed,   setMatchFeed]   = useState("Opening whistle. Read the first pressure.");
+  const [actionClock, setActionClock] = useState({ seconds:ACTION_SELECT_SECONDS, visible:false, expired:false });
   const [celebrate,   setCelebrate]   = useState(false);
   const [transitionOvl, setTransitionOvl] = useState(null);
   const [popH,        setPopH]        = useState(false);
@@ -723,6 +793,48 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     });
   };
 
+  // ── End of match ─────────────────────────────────────────────────────────
+  async function endGame(g) {
+    const { score } = g;
+    g.phase = "finished";
+    setPhase("finished");
+    clearTimeout(timerRef.current);
+    const prevRank  = myRank(S, LB);
+    const prevTier  = getTier(S.rep || 0);
+
+    const { repDelta, breakdowns, nextState: ns } = buildMatchRewards(score, S);
+    ns.lastDelta    = repDelta;
+    ns.lastPrevRank = prevRank;
+
+    const newLB   = simCPU(LB);
+    const newRank = myRank(ns, newLB);
+    const newTier = getTier(ns.rep || 0);
+    const rewardKey = checkRewardUnlock(ns);
+    const tierChange = prevTier?.name !== newTier?.name
+      ? { dir:newRank < prevRank ? "up" : "down", prevTier, newTier, newRank }
+      : null;
+
+    setS(ns);
+    setLB(newLB);
+    saveLB?.(newLB, ns.wallet);
+
+    const tca = turnCountRef.current;
+    playSound("halftimeWhistle", { volume:0.24 });
+    playSound("matchEnd", { volume:0.24 });
+    trackMatchCompleted({
+      score,
+      win:           score.h > score.a,
+      draw:          score.h === score.a,
+      repDelta,
+      turnsPlayed:   tca.total,
+      turnsCorrect:  tca.correct,
+      turnsWrong:    tca.wrong,
+      formationId:   S?.formationId || "unknown",
+      opponentStyle: "unknown",
+    });
+    setFtOvl({ h:score.h, a:score.a, win:score.h>score.a, draw:score.h===score.a, delta:repDelta, bd:breakdowns, prevRank, newRank, prevTier, newTier, rewardKey, tierChange, nextState:ns, matchStats:{...matchStatsRef.current} });
+  }
+
   const advanceTurn = (g, nextGs, turnResult = null) => {
     const prevGs = g.gs;
     const prevMidfieldSide = g.midfieldSide || "home";
@@ -787,7 +899,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   };
 
   // ── Player picks an action ───────────────────────────────────────────────
-  const doAct = async (idx) => {
+  const doAct = async (idx, meta = {}) => {
     const g = gRef.current;
     if (!g || g.phase !== "playing") return;
 
@@ -798,14 +910,16 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     }
 
     g.phase = "result";
+    const actionContext = buildTurnContext(g.gs, g.si, g.stats, S.formationId || null, { midfieldSide:g.midfieldSide || "home" });
     setSelectedAction(idx);
-    const previewIntent = context?.availableIntents?.[idx] || null;
+    const previewIntent = actionContext?.availableIntents?.[idx] || null;
     setPreviewIntentId(previewIntent);
     setSelectedRate(null);
     setSelectedOutcome(null);
     setPendingTurn(null);
     setPhase("result");
     clearTimeout(timerRef.current);
+    setActionClock((clock) => ({ ...clock, visible:false }));
 
     const bt = BT[g.gs][idx];
     const prevScoreH = g.score.h;
@@ -813,6 +927,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     const prevPhase = g.gs;
 
     setCpuChoice({ lbl:"Resolving...", favorable:null, narr:"" });
+    const preventGoals = !!meta.preventGoals || (!!meta.timeout && !!meta.randomized);
 
     const buildLocalTurnResult = () => {
       const context = buildTurnContext(prevPhase, g.si, g.stats, S.formationId || null, { midfieldSide:g.midfieldSide || "home" });
@@ -823,8 +938,23 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
         opponentName: opponent?.name || null,
         difficulty: opponent?.difficulty || "medium",
       });
-      const goalScored = local.nextGs === "GOAL";
-      const conceded = local.nextGs === "CONCEDE";
+      let goalScored = local.nextGs === "GOAL";
+      let conceded = local.nextGs === "CONCEDE";
+      let nextGs = goalScored || conceded ? "MIDFIELD" : local.nextGs;
+      let nextMidfieldSide = goalScored ? "away" : conceded ? "home" : local.nextMidfieldSide;
+      let ok = local.ok;
+      let favorable = local.favorable;
+      let cm = local.commentary;
+
+      if (preventGoals && (goalScored || conceded)) {
+        goalScored = false;
+        conceded = false;
+        nextGs = "MIDFIELD";
+        nextMidfieldSide = "home";
+        ok = false;
+        favorable = false;
+        cm = "Clock randomization kept the score unchanged.";
+      }
 
       if (goalScored) g.score.h += 1;
       if (conceded) g.score.a += 1;
@@ -832,18 +962,20 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
       return {
         source: "client",
-        ok: local.ok,
+        ok,
+        timeout: !!meta.timeout,
+        randomized: !!meta.randomized,
         goalScored,
         conceded,
-        nextGs: goalScored || conceded ? "MIDFIELD" : local.nextGs,
-        nextMidfieldSide: goalScored ? "away" : conceded ? "home" : local.nextMidfieldSide,
+        nextGs,
+        nextMidfieldSide,
         cpuLbl: local.cpuLbl,
         cpuIntent: local.cpuIntent,
         playerIntent: local.playerIntent,
-        favorable: local.favorable,
+        favorable,
         narr: local.narr,
         rate: local.rate,
-        cm: local.commentary,
+        cm,
         explanation: local.explanation,
         movement: local.movement,
         effects: local.effects,
@@ -968,7 +1100,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
     try {
       let turnResult;
-      if (dojo && account && provider && !chainFailed) {
+      if (!preventGoals && dojo && account && provider && !chainFailed) {
         turnResult = await buildChainTurnResult();
       } else {
         turnResult = buildLocalTurnResult();
@@ -1025,7 +1157,7 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       if (prevPhase === "MIDFIELD" && turnResult.context?.midfieldSide === "away") matchStatsRef.current.attacks_a++;
 
       const clip = pickConsequenceClip(turnResult, prevPhase);
-      const consequenceScene = buildConsequenceScene(turnResult.context || context, turnResult, clip);
+      const consequenceScene = buildConsequenceScene(turnResult.context || actionContext, turnResult, clip);
       const targetBall = consequenceScene.ball || turnResult.movement?.target || { x:bt.x, y:bt.y };
       const carrierId = turnResult.context?.ballCarrierId || turnResult.movement?.ballFrom || null;
       const carrier = (turnResult.context?.players || []).find(p => p.id === carrierId);
@@ -1095,6 +1227,9 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
       showToast(`❌ Turn failed: ${errorMsg}`);
     }
   };
+  useEffect(() => {
+    doActRef.current = doAct;
+  });
 
   const continueAfterResolution = () => {
     const g = gRef.current;
@@ -1137,48 +1272,6 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
     }
   };
 
-  // ── End of match ─────────────────────────────────────────────────────────
-  const endGame = async (g) => {
-    const { score } = g;
-    g.phase = "finished";
-    setPhase("finished");
-    clearTimeout(timerRef.current);
-    const prevRank  = myRank(S, LB);
-    const prevTier  = getTier(S.rep || 0);
-
-    const { repDelta, breakdowns, nextState: ns } = buildMatchRewards(score, S);
-    ns.lastDelta    = repDelta;
-    ns.lastPrevRank = prevRank;
-
-    const newLB   = simCPU(LB);
-    const newRank = myRank(ns, newLB);
-    const newTier = getTier(ns.rep || 0);
-    const rewardKey = checkRewardUnlock(ns);
-    const tierChange = prevTier?.name !== newTier?.name
-      ? { dir:newRank < prevRank ? "up" : "down", prevTier, newTier, newRank }
-      : null;
-
-    setS(ns);
-    setLB(newLB);
-    saveLB?.(newLB, ns.wallet);
-
-    const tca = turnCountRef.current;
-    playSound("halftimeWhistle", { volume:0.24 });
-    playSound("matchEnd", { volume:0.24 });
-    trackMatchCompleted({
-      score,
-      win:           score.h > score.a,
-      draw:          score.h === score.a,
-      repDelta,
-      turnsPlayed:   tca.total,
-      turnsCorrect:  tca.correct,
-      turnsWrong:    tca.wrong,
-      formationId:   S?.formationId || "unknown",
-      opponentStyle: "unknown",
-    });
-    setFtOvl({ h:score.h, a:score.a, win:score.h>score.a, draw:score.h===score.a, delta:repDelta, bd:breakdowns, prevRank, newRank, prevTier, newTier, rewardKey, tierChange, nextState:ns, matchStats:{...matchStatsRef.current} });
-  };
-
   // ── Derived render values ────────────────────────────────────────────────
   const { gs, score, turn, players, ball, si, context, midfieldSide } = disp;
   const zm         = { MIDFIELD:{ col:"#facc15" }, ATTACK:{ col:"#4ade80" }, DEFEND:{ col:"#f87171" } }[gs];
@@ -1193,6 +1286,39 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
   const phaseCamera = buildClipCamera(consequenceClip?.camera, tacticalCamera);
   const opponentName = opponent?.name || "RIVALS FC";
   const nextCardsDisplay = queuedNextDisplay || disp;
+
+  useEffect(() => {
+    if (phase !== "playing" || preMatchStage !== "play" || pauseOpen) {
+      return undefined;
+    }
+
+    const startedAt = Date.now();
+    const startTimer = window.setTimeout(() => {
+      setActionClock({ seconds:ACTION_SELECT_SECONDS, visible:true, expired:false });
+    }, 0);
+
+    const interval = window.setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000);
+      const remaining = Math.max(0, ACTION_SELECT_SECONDS - elapsed);
+      setActionClock({ seconds:remaining, visible:remaining > 0, expired:remaining <= 0 });
+
+      if (remaining > 0) return;
+      window.clearInterval(interval);
+
+      const g = gRef.current;
+      if (!g || g.phase !== "playing") return;
+
+      setMatchFeed("Read clock expired. No penalty in solo mode.");
+      window.setTimeout(() => {
+        setActionClock((clock) => ({ ...clock, visible:false }));
+      }, 450);
+    }, 250);
+
+    return () => {
+      window.clearTimeout(startTimer);
+      window.clearInterval(interval);
+    };
+  }, [phase, preMatchStage, pauseOpen, turn, gs, si, midfieldSide]);
 
   const continuePostMatch = () => {
     if (tierOvl) {
@@ -1603,6 +1729,10 @@ export default function GameScreen({ S, setS, LB, setLB, saveLB, onHome, showToa
 
         {/* Commentary */}
         {SHOW_COMMENTARY_BAR && <Commentary text={commentary}/>}
+
+        {phase === "playing" && (
+          <ActionCountdown clock={actionClock} isPvp={false} />
+        )}
 
         {phase === "playing" && SHOW_TURN_CONTEXT_LINE && (
           <div style={{

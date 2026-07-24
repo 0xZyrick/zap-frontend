@@ -15,6 +15,15 @@ import {
   submitTurnAction,
   continueAfterHalftime,
   claimGameReward,
+  createPvpRoom,
+  joinPvpRoom,
+  cancelPvpRoom,
+  commitPvpTurn,
+  revealPvpTurn,
+  continuePvpAfterHalftime,
+  claimPvpTimeout,
+  getPvpSession,
+  makePvpSalt,
   purchaseCardFromShop,
   sellCardToShop,
   getSession,
@@ -211,6 +220,52 @@ export function useDojoGame(account, provider) {
     setSessionId(null);
   }, [exec]);
 
+  // ── PVP ──────────────────────────────────────────────────────────────────
+
+  const doCreatePvpRoom = useCallback(async () => {
+    setTxPending(true);
+    setTxError(null);
+    try {
+      return await createPvpRoom(account, provider);
+    } catch (e) {
+      setTxError(e?.message || String(e));
+      throw e;
+    } finally {
+      setTxPending(false);
+    }
+  }, [account, provider]);
+
+  const doJoinPvpRoom = useCallback(async (pvpSessionId) => {
+    setTxPending(true);
+    setTxError(null);
+    try {
+      return await joinPvpRoom(account, provider, pvpSessionId);
+    } catch (e) {
+      setTxError(e?.message || String(e));
+      throw e;
+    } finally {
+      setTxPending(false);
+    }
+  }, [account, provider]);
+
+  const doCancelPvpRoom = useCallback((pvpSessionId) =>
+    exec(cancelPvpRoom, provider, pvpSessionId), [exec, provider]);
+
+  const doCommitPvpTurn = useCallback((pvpSessionId, action, salt, turnNumber) =>
+    exec(commitPvpTurn, provider, pvpSessionId, action, salt, turnNumber), [exec, provider]);
+
+  const doRevealPvpTurn = useCallback((pvpSessionId, action, salt) =>
+    exec(revealPvpTurn, provider, pvpSessionId, action, salt), [exec, provider]);
+
+  const doContinuePvpAfterHalftime = useCallback((pvpSessionId) =>
+    exec(continuePvpAfterHalftime, provider, pvpSessionId), [exec, provider]);
+
+  const doClaimPvpTimeout = useCallback((pvpSessionId) =>
+    exec(claimPvpTimeout, provider, pvpSessionId), [exec, provider]);
+
+  const doGetPvpSession = useCallback((pvpSessionId) =>
+    getPvpSession(provider, pvpSessionId), [provider]);
+
   // ── Market ────────────────────────────────────────────────────────────────
 
   const doBuyCard = useCallback((cardId) =>
@@ -231,6 +286,15 @@ export function useDojoGame(account, provider) {
     doResolveTurn,
     doContinueHalftime,
     doClaimReward,
+    doCreatePvpRoom,
+    doJoinPvpRoom,
+    doCancelPvpRoom,
+    doCommitPvpTurn,
+    doRevealPvpTurn,
+    doContinuePvpAfterHalftime,
+    doClaimPvpTimeout,
+    doGetPvpSession,
+    makePvpSalt,
     doBuyCard,
     doSellCard,
   };

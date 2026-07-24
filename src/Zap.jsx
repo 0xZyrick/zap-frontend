@@ -9,8 +9,8 @@ import { FORMATION_FELT, FORMATIONS } from "./game/constants.js";
 import { defS, defLB, normalizeState, formatClubName } from "./game/gameState.js";
 import { useWallet }       from "./hooks/useWallet.js";
 import { useDojoGame }     from "./hooks/useDojoGame.js";
-import { getPlayerRegistry, registerPlayer }  from "./lib/calls.js";
-import { CreateClubScreen, HomeScreen, ModeSelectionScreen, MissionsScreen, ShopScreen } from "./screens/HomeScreens.jsx";
+import { getPlayerRegistry, isAlreadyRegisteredError, registerPlayer }  from "./lib/calls.js";
+import { HomeScreen, ModeSelectionScreen, MissionsScreen, ShopScreen } from "./screens/HomeScreens.jsx";
 import { PreMatchScreen, MatchFoundScreen }           from "./screens/MatchScreens.jsx";
 import { Leaderboard }                                from "./screens/Leaderboard.jsx";
 import GameScreen                                     from "./game/GameScreen.jsx";
@@ -26,8 +26,7 @@ const walletKey = (wallet) => String(wallet || "local").toLowerCase();
 const stateKey = (wallet) => `zapfc:s5:${walletKey(wallet)}`;
 const leaderboardKey = (wallet) => `zapfc:lb5:${walletKey(wallet)}`;
 const TRAINING_MODE_ENABLED = false;
-const BOOT_LOADING_MS = 13000;
-const ENTER_CONNECT_TIMEOUT_MS = 9000;
+const BOOT_LOADING_MS = 2500;
 const PLAYER_LOADING = "/assets/players/loading-anime.png";
 const LOADING_BG = "/assets/bg/loading-bg.png";
 const ZAP_LOGO = "/assets/logo/zap-logo.png";
@@ -50,6 +49,8 @@ const CRITICAL_ASSETS = [
   "/assets/icons/rank.png",
 ];
 
+const delay = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 const loadProfile = (wallet) => {
   let s = normalizeState({ ...defS(), wallet: wallet || "local" });
   let lb = defLB();
@@ -62,15 +63,6 @@ const loadProfile = (wallet) => {
     if (r) lb = JSON.parse(r);
   } catch (_) {}
   return { s, lb };
-};
-
-const withTimeout = (promise, ms, label) => {
-  let timer = null;
-  const timeout = new Promise((_, reject) => {
-    timer = window.setTimeout(() => reject(new Error(label)), ms);
-  });
-  promise.catch(() => null);
-  return Promise.race([promise, timeout]).finally(() => window.clearTimeout(timer));
 };
 
 function SplashSocialIcon({ type }) {
@@ -213,7 +205,18 @@ function shouldAskClubIdentity(state) {
   );
 }
 
-function ClubIdentityModal({ initialName = "", saving = false, onSave, onLater }) {
+function ClubIdentityModal({
+  initialName = "",
+  saving = false,
+  onSave,
+  onLater,
+  walletAddress = "",
+  onCopyAddress,
+  showLater = true,
+  eyebrow = "FIRST MATCH COMPLETE",
+  title = "What should the clubhouse call your squad?",
+  body = "Your first run is saved. Add a matchday name now, or keep playing and decide later.",
+}) {
   const [clubName, setClubName] = useState(initialName);
   const clean = clubName.trim().replace(/\s+/g, " ");
   const canSave = clean.length >= 2 && !saving;
@@ -226,9 +229,18 @@ function ClubIdentityModal({ initialName = "", saving = false, onSave, onLater }
   return (
     <div className="zap-modal-backdrop">
       <form className="club-identity-modal" onSubmit={submit}>
-        <div className="club-identity-modal__eyebrow">FIRST MATCH COMPLETE</div>
-        <h2>What should the clubhouse call your squad?</h2>
-        <p>Your first run is saved. Add a matchday name now, or keep playing and decide later.</p>
+        <div className="club-identity-modal__eyebrow">{eyebrow}</div>
+        <h2>{title}</h2>
+        <p>{body}</p>
+        {walletAddress && (
+          <div className="club-identity-modal__wallet">
+            <span>Fund this account before registering</span>
+            <code>{walletAddress}</code>
+            <button type="button" onClick={() => onCopyAddress?.(walletAddress)}>
+              Copy address
+            </button>
+          </div>
+        )}
         <input
           value={clubName}
           maxLength={28}
@@ -236,11 +248,44 @@ function ClubIdentityModal({ initialName = "", saving = false, onSave, onLater }
           onChange={(e) => setClubName(e.target.value.toUpperCase())}
           placeholder="SQUAD NAME"
         />
-        <div className="club-identity-modal__actions">
-          <button type="button" onClick={onLater}>Later</button>
+        <div className={`club-identity-modal__actions ${showLater ? "" : "club-identity-modal__actions--single"}`}>
+          {showLater && <button type="button" onClick={onLater}>Later</button>}
           <button type="submit" disabled={!canSave}>{saving ? "Saving..." : "Save squad"}</button>
         </div>
       </form>
+    </div>
+  );
+}
+
+function WalletChoiceModal({ hasCartridgeWallet, hasReadyWallet, onCartridge, onReady, onClose }) {
+  return (
+    <div className="zap-modal-backdrop">
+      <div className="wallet-choice-modal">
+        <div className="wallet-choice-modal__eyebrow">WALLET ROUTE</div>
+        <h2>Connect wallet</h2>
+        <p>Cartridge is the smooth game route with sessions. Ready wallet stays available as a funded fallback.</p>
+        <button
+          type="button"
+          disabled={!hasCartridgeWallet}
+          onClick={onCartridge}
+          className="wallet-choice-modal__option"
+        >
+          <span>Cartridge Controller</span>
+          <small>{hasCartridgeWallet ? "Session keys + sponsorship route" : "Controller unavailable"}</small>
+        </button>
+        <button
+          type="button"
+          disabled={!hasReadyWallet}
+          onClick={onReady}
+          className="wallet-choice-modal__option"
+        >
+          <span>Ready wallet</span>
+          <small>{hasReadyWallet ? "Argent X or Braavos" : "Install Argent X or Braavos"}</small>
+        </button>
+        <button type="button" onClick={onClose} className="wallet-choice-modal__cancel">
+          Cancel
+        </button>
+      </div>
     </div>
   );
 }
@@ -259,12 +304,14 @@ export default function Zap() {
   const [welcomeBanner, setWelcomeBanner] = useState(null);
   const [clubPrompt,    setClubPrompt]    = useState(false);
   const [savingClub,    setSavingClub]    = useState(false);
+  const [walletChoice,  setWalletChoice]  = useState(false);
 
   const toastRef = useRef(null);
   const welcomeRef = useRef(null);
   const registerPromiseRef = useRef(null);
+  const walletSessionRef = useRef(null);
 
-  const { account, address, provider, connect } = useWallet();
+  const { account, address, provider, connect, hasCartridgeWallet, hasReadyWallet } = useWallet();
   const dojo = useDojoGame(account, provider);
 
   useEffect(() => {
@@ -325,10 +372,12 @@ export default function Zap() {
     toastRef.current = setTimeout(() => setToast(null), dur);
   }, []);
 
-  const showWelcome = useCallback((clubName) => {
+  const showWelcome = useCallback((clubName, mode = "back") => {
     const name = formatClubName(clubName || "ZAP FC");
     clearTimeout(welcomeRef.current);
-    setWelcomeBanner(`Welcome ${name}, nice to have you back.`);
+    setWelcomeBanner(mode === "new"
+      ? `Welcome ${name}. Clubhouse ready.`
+      : `Welcome back, ${name}. Nice to have you back.`);
     welcomeRef.current = setTimeout(() => setWelcomeBanner(null), 3200);
   }, []);
 
@@ -358,6 +407,15 @@ export default function Zap() {
     return next;
   }, [S, account?.address, address, saveS]);
 
+  const fetchRegistryWithRetry = useCallback(async (wallet, attempts = 4) => {
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const registry = await getPlayerRegistry(wallet);
+      if (registry?.registered) return registry;
+      if (attempt < attempts - 1) await delay(700);
+    }
+    return null;
+  }, []);
+
   const ensureRegistered = useCallback(async (clubName, stateLike = S, walletSession = null) => {
     const activeAccount = walletSession?.account || account;
     const activeProvider = walletSession?.provider || provider;
@@ -368,18 +426,29 @@ export default function Zap() {
 
     const wallet = activeWallet;
     registerPromiseRef.current = (async () => {
-      const registry = await getPlayerRegistry(wallet);
+      const registry = await fetchRegistryWithRetry(wallet);
       if (registry?.registered) {
         markOnchainRegistered(stateLike, registry, wallet);
         return { alreadyRegistered: true, registry };
       }
 
-      const tx = await registerPlayer(activeAccount, clubName);
+      let tx = null;
+      try {
+        tx = await registerPlayer(activeAccount, clubName);
+      } catch (error) {
+        if (!isAlreadyRegisteredError(error)) throw error;
+        const confirmedRegistry = await fetchRegistryWithRetry(wallet, 6);
+        markOnchainRegistered(stateLike, confirmedRegistry, wallet);
+        return { alreadyRegistered: true, registry: confirmedRegistry };
+      }
       if (tx?.transaction_hash && activeProvider) {
         await activeProvider.waitForTransaction(tx.transaction_hash);
       }
       if (tx?.transaction_hash || tx?.alreadyRegistered) {
-        markOnchainRegistered(stateLike, null, wallet);
+        const confirmedRegistry = tx?.alreadyRegistered
+          ? await fetchRegistryWithRetry(wallet, 6)
+          : null;
+        markOnchainRegistered(stateLike, confirmedRegistry, wallet);
       }
       return tx;
     })().finally(() => {
@@ -387,7 +456,7 @@ export default function Zap() {
     });
 
     return registerPromiseRef.current;
-  }, [S, account, address, markOnchainRegistered, provider]);
+  }, [S, account, address, fetchRegistryWithRetry, markOnchainRegistered, provider]);
 
   // ── Bootstrap ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -411,7 +480,7 @@ export default function Zap() {
     const isWallet = wallet && wallet !== "local";
 
     if (isWallet) {
-      const registry = await getPlayerRegistry(wallet);
+      const registry = await fetchRegistryWithRetry(wallet);
       if (registry?.registered) {
         s = normalizeState({
           ...s,
@@ -422,6 +491,29 @@ export default function Zap() {
           onchainRegistered: true,
         });
         try { localStorage.setItem(stateKey(wallet), JSON.stringify(s)); } catch (_) {}
+      } else if (s?.onchainRegistered || s?.clubIdentitySet) {
+        s = normalizeState({
+          ...s,
+          wallet,
+          clubCreated: true,
+          clubIdentitySet: true,
+          onchainRegistered: !!s?.onchainRegistered,
+        });
+      } else {
+        s = normalizeState({
+          ...s,
+          wallet,
+          clubName: "ZAP",
+          clubCreated: false,
+          clubIdentitySet: false,
+          clubIdentityPrompted: false,
+          onchainRegistered: false,
+        });
+        setSelectedFId(s.formationId || "control-433");
+        setS(s);
+        setLB(lb);
+        setScreen("createClub");
+        return { registered:false, state:s, lb };
       }
     }
 
@@ -436,9 +528,11 @@ export default function Zap() {
     if (options.welcome && isWallet) {
       showWelcome(s.clubName || "ZAP FC");
     }
-  }, [showWelcome]);
+    return { registered:!!s.onchainRegistered || !!s.clubIdentitySet, state:s, lb };
+  }, [fetchRegistryWithRetry, showWelcome]);
 
   useEffect(() => {
+    if (walletSessionRef.current) return;
     if (!entering || !account || !provider) return;
     const id = window.setTimeout(() => {
       setProfileSyncing(true);
@@ -451,27 +545,33 @@ export default function Zap() {
   }, [account, address, entering, provider, routeForWallet]);
 
   // ── Splash → connect wallet invisibly → route ─────────────────────────────
-  const handleEnter = useCallback(async () => {
+  const connectAndRoute = useCallback(async (mode) => {
     unlockAudio();
     setEntering(true);
+    setWalletChoice(false);
     try {
       const walletSession = account && provider
         ? { account, provider, address:account.address || address }
-        : await withTimeout(connect(), ENTER_CONNECT_TIMEOUT_MS, "Wallet connection timed out");
+        : await connect(mode);
       const wallet = walletSession?.account?.address || walletSession?.address || account?.address || address;
+      walletSessionRef.current = walletSession;
+      if (!wallet) throw new Error("Wallet connection did not return an address");
       setProfileSyncing(!!wallet && wallet !== "local");
-      await routeForWallet(wallet || "local", { welcome:!!wallet && wallet !== "local" });
+      await routeForWallet(wallet, { welcome:true });
       setEntering(false);
       setProfileSyncing(false);
     } catch (error) {
-      await routeForWallet("local");
-      showToast(error?.message === "Wallet connection timed out"
-        ? "Cartridge is taking too long. Entered local clubhouse for now."
-        : "Wallet login failed. Entered local clubhouse for now.");
+      showToast(error?.message || "Wallet login failed. Please try again or use Guest Mode.", 4200);
       setEntering(false);
       setProfileSyncing(false);
+      setScreen("entry");
     }
   }, [account, address, connect, provider, routeForWallet, showToast]);
+
+  const handleEnter = useCallback(() => {
+    unlockAudio();
+    setWalletChoice(true);
+  }, []);
 
   const handleGuestEnter = useCallback(async () => {
     unlockAudio();
@@ -483,9 +583,13 @@ export default function Zap() {
     }
   }, [routeForWallet]);
 
-  // ── Create club → register on-chain (non-blocking) ───────────────────────
+  // ── Create club → register on-chain before clubhouse opens ───────────────
   const handleCreateClub = useCallback(async (clubName) => {
     const formattedName = formatClubName(clubName);
+    const walletSession = walletSessionRef.current;
+    const activeAccount = walletSession?.account || account;
+    const activeProvider = walletSession?.provider || provider;
+    const walletAddress = walletSession?.address || activeAccount?.address || account?.address || address || "local";
     const ns = normalizeState({
       ...S,
       clubName:    formattedName,
@@ -493,32 +597,83 @@ export default function Zap() {
       clubIdentitySet: true,
       clubIdentityPrompted: true,
       trainingDone: TRAINING_MODE_ENABLED ? S?.trainingDone : true,
-      wallet:      account?.address || address || "local",
+      wallet:      walletAddress,
     });
-    setS(ns); saveS(ns);
-    setScreen(TRAINING_MODE_ENABLED && !ns.trainingDone ? "training" : "home");
-    showToast("⚽ Welcome, " + formattedName + "!");
-    trackClubCreated();
 
-    // Register on-chain in background — never block the game.
-    // If Torii already has this wallet, no Cartridge modal is opened.
-    if (account) {
-      (async () => {
-        try {
-          const result = await ensureRegistered(formattedName, ns);
-          if (result?.registry) {
-            showToast("Using existing on-chain club: " + formatClubName(result.registry.clubName));
-          }
-        } catch {
-          // Non-blocking: club creation should continue even if registration is unavailable.
+    setSavingClub(true);
+
+    if (walletAddress !== "local") {
+      if (!activeAccount) {
+        showToast("Wallet connection needed to create your club.");
+        setSavingClub(false);
+        return;
+      }
+      setProfileSyncing(true);
+      try {
+        const result = await ensureRegistered(formattedName, ns, {
+          account: activeAccount,
+          provider: activeProvider,
+          address: walletAddress,
+        });
+        const registry = result?.registry || await fetchRegistryWithRetry(walletAddress);
+        const finalState = normalizeState({
+          ...ns,
+          clubName: registry?.clubName || formattedName,
+          clubCreated: true,
+          clubIdentitySet: true,
+          clubIdentityPrompted: true,
+          onchainRegistered: true,
+        });
+        setS(finalState);
+        saveS(finalState);
+        setScreen(TRAINING_MODE_ENABLED && !finalState.trainingDone ? "training" : "home");
+        showWelcome(finalState.clubName, "new");
+        trackClubCreated();
+      } catch (error) {
+        if (isAlreadyRegisteredError(error)) {
+          const registry = await fetchRegistryWithRetry(walletAddress, 6);
+          const finalState = markOnchainRegistered(ns, registry, walletAddress);
+          setScreen(TRAINING_MODE_ENABLED && !finalState.trainingDone ? "training" : "home");
+          showWelcome(finalState.clubName, "back");
+        } else {
+          showToast("Could not create club on-chain. Please try again.");
         }
-      })();
+      } finally {
+        setProfileSyncing(false);
+        setSavingClub(false);
+      }
+      return;
     }
-  }, [S, account, address, ensureRegistered, saveS, showToast]);
+
+    setS(ns);
+    saveS(ns);
+    setScreen(TRAINING_MODE_ENABLED && !ns.trainingDone ? "training" : "home");
+    showWelcome(formattedName, "new");
+    trackClubCreated();
+    setSavingClub(false);
+  }, [S, account, address, ensureRegistered, fetchRegistryWithRetry, markOnchainRegistered, provider, saveS, showToast, showWelcome]);
 
   const handleSaveClubIdentity = useCallback(async (clubName) => {
     const formattedName = formatClubName(clubName);
     setSavingClub(true);
+    if ((S?.wallet || "local") === "local") {
+      const ns = normalizeState({
+        ...S,
+        clubName: formattedName,
+        clubCreated: true,
+        clubIdentitySet: true,
+        clubIdentityPrompted: true,
+        trainingDone: TRAINING_MODE_ENABLED ? S?.trainingDone : true,
+        wallet: "local",
+      });
+      setS(ns);
+      saveS(ns);
+      setClubPrompt(false);
+      showToast("Guest squad name saved locally.");
+      trackClubCreated();
+      setSavingClub(false);
+      return;
+    }
     let walletSession = null;
     try {
       walletSession = account && provider
@@ -549,11 +704,17 @@ export default function Zap() {
     try {
       await ensureRegistered(formattedName, ns, walletSession);
       showToast("Club saved to wallet.");
-    } catch {
-      showToast("Saved locally. On-chain claim can wait.");
+    } catch (error) {
+      if (isAlreadyRegisteredError(error)) {
+        const registry = await fetchRegistryWithRetry(walletAddress, 6);
+        markOnchainRegistered(ns, registry, walletAddress);
+        showToast("Wallet club already exists. Synced profile.");
+      } else {
+        showToast("Saved locally. On-chain claim can wait.");
+      }
     }
     setSavingClub(false);
-  }, [S, account, address, connect, ensureRegistered, provider, saveS, showToast]);
+  }, [S, account, address, connect, ensureRegistered, fetchRegistryWithRetry, markOnchainRegistered, provider, saveS, showToast, showWelcome]);
 
   const handleClubIdentityLater = useCallback(() => {
     const ns = normalizeState({
@@ -658,6 +819,15 @@ export default function Zap() {
           onGuest={handleGuestEnter}
           label={entering ? "ENTERING CLUBHOUSE" : "LOADING CLUBHOUSE"}
         />
+        {walletChoice && (
+          <WalletChoiceModal
+            hasCartridgeWallet={hasCartridgeWallet}
+            hasReadyWallet={hasReadyWallet}
+            onCartridge={() => connectAndRoute("cartridge")}
+            onReady={() => connectAndRoute("ready")}
+            onClose={() => setWalletChoice(false)}
+          />
+        )}
         {toast && <Toast msg={toast}/>}
       </>
     );
@@ -677,9 +847,33 @@ export default function Zap() {
       <div style={{ position:"relative", zIndex:1, width:"100%", height:"100%", overflow:"hidden" }}>
 
         {screen === "createClub" && (
-          <CreateClubScreen
-            initialName={S.clubName !== "ZAP" ? S.clubName : ""}
-            onCreate={handleCreateClub}
+          <ClubIdentityModal
+            initialName={S.clubIdentitySet ? S.clubName : ""}
+            saving={savingClub}
+            onSave={handleCreateClub}
+            walletAddress={S?.wallet && S.wallet !== "local" ? S.wallet : address || account?.address || ""}
+            onCopyAddress={async (walletAddress) => {
+              try {
+                await navigator.clipboard.writeText(walletAddress);
+                showToast("Wallet address copied.");
+              } catch {
+                showToast("Copy failed. Select the address manually.");
+              }
+            }}
+            showLater={false}
+            eyebrow="CREATE CLUB"
+            title="Name your club"
+            body="Your wallet is connected. Choose the club name that will be registered to this profile."
+          />
+        )}
+
+        {walletChoice && (
+          <WalletChoiceModal
+            hasCartridgeWallet={hasCartridgeWallet}
+            hasReadyWallet={hasReadyWallet}
+            onCartridge={() => connectAndRoute("cartridge")}
+            onReady={() => connectAndRoute("ready")}
+            onClose={() => setWalletChoice(false)}
           />
         )}
 
@@ -700,10 +894,8 @@ export default function Zap() {
             S={S}
             LB={LB}
             onSinglePlayer={() => setScreen("matchfound")}
-            onPvp={(room) => {
-              launchGame({ name:room?.opponent?.clubName || "PVP RIVAL", rep:room?.opponent?.rep || S?.rep || 50, difficulty:"hard", pvpRoom:room?.code });
-            }}
             onBack={() => setScreen("home")}
+            pvp={dojo}
           />
         )}
 

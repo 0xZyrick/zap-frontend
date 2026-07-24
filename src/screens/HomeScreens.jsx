@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { StadiumEnvironment } from "../pitch/pitch.jsx";
 import { myRank } from "../game/gameState.js";
 import HomeStadiumBackdrop from "../ui/HomeStadiumBackdrop.jsx";
-import { createPvpRoom, getPvpRoom, joinPvpRoom, subscribePvpRooms } from "../lib/pvpRooms.js";
+import PlayerCard from "../players/PlayerCard.jsx";
 import "./homeScreen.css";
 
 const PLAYER_HOME = "/assets/players/anime-home.png";
@@ -15,9 +15,17 @@ const RANK_ICON = "/assets/icons/rank.png";
 const LEADERBOARD_CARD_IMAGE = "/assets/announcements/leaderboard-bg.png";
 const TOURNAMENT_CARD_IMAGE = "/assets/announcements/tournament-bg.png";
 const CREST_GENERATION_BG = "/assets/bg/crest-generation-bg.png";
+const PLAYER_CARD_FRAME = "/assets/bg/card-texture.png";
+const PLAYER_CARD_ART = "/assets/players/player_attack.png";
 const ANNOUNCEMENT_CANDIDATES = [
   ...Array.from({ length: 5 }, (_, i) => `/assets/announcements/announcement-${String(i + 1).padStart(2, "0")}.png`),
 ];
+const ACHIEVEMENT_ASSETS = {
+  "ach-read-master": "/assets/mission/read_master.png",
+  "ach-counter-caller": "/assets/mission/counter_call.png",
+  "ach-comeback-king": "/assets/mission/comeback_king.png",
+  "ach-clean-sheet": "/assets/mission/clean_sheet.png",
+};
 
 const CRESTS = {
   derick: "/assets/crests/derick.png",
@@ -71,6 +79,7 @@ function buildMissions(S = {}) {
       target,
       reward,
       reset,
+      asset: ACHIEVEMENT_ASSETS[id] || null,
       complete,
       claimed: !!claims[id],
       pct: Math.min(100, Math.round(progress / Math.max(target, 1) * 100)),
@@ -330,16 +339,21 @@ export function CreateClubScreen({ initialName = "", onCreate }) {
 export function HomeScreen({ S, LB = [], onKickOff, onLB, onMissions, onShop, onTeam }) {
   const [announcementImages, setAnnouncementImages] = useState(ANNOUNCEMENT_CANDIDATES);
   const [announcementIndex, setAnnouncementIndex] = useState(0);
+  const [profileOpen, setProfileOpen] = useState(false);
   const visibleAnnouncements = announcementImages.length ? announcementImages : ["/assets/announcements/announcement-01.png"];
   const activeAnnouncement = visibleAnnouncements[announcementIndex % visibleAnnouncements.length];
   const nextAnnouncement = visibleAnnouncements[(announcementIndex + 1) % visibleAnnouncements.length];
+  const { clubName, initials, clubCrest } = getClubDisplay(S);
+  const isGuestProfile = !S?.wallet || S.wallet === "local" || !S?.onchainRegistered;
+  const totalReads = Math.max(1, Number(S?.correctReads || 0) + Number(S?.wrongReads || S?.losses || 0));
+  const baseAccuracy = Math.round((Number(S?.correctReads || S?.wins || 0) / totalReads) * 100);
+  const profileRating = Math.max(40, Math.min(99, Math.round(50 + Number(S?.rep || 0) / 8)));
+  const matchCode = S?.wallet && S.wallet !== "local"
+    ? `ZAP-${String(S.wallet).slice(2, 8).toUpperCase()}-${String(S.wallet).slice(-4).toUpperCase()}`
+    : "GUEST-PROFILE-LOCKED";
   const removeMissingAnnouncement = (src) => {
     setAnnouncementImages((items) => items.length > 1 ? items.filter((item) => item !== src) : items);
   };
-
-  useEffect(() => {
-    setAnnouncementIndex((index) => index % Math.max(visibleAnnouncements.length, 1));
-  }, [visibleAnnouncements.length]);
 
   useEffect(() => {
     if (visibleAnnouncements.length <= 1) return undefined;
@@ -436,131 +450,257 @@ export function HomeScreen({ S, LB = [], onKickOff, onLB, onMissions, onShop, on
           </button>
 
         </section>
+
+        <button
+          type="button"
+          className="zap-player-profile-fab"
+          onClick={() => setProfileOpen(true)}
+          aria-label="Open player profile"
+          title="Player profile"
+        >
+          <span>{clubCrest ? <img src={clubCrest} alt="" draggable={false} /> : initials}</span>
+          <b>PROFILE</b>
+        </button>
+
+        {profileOpen && (
+          <div className="zap-modal-backdrop">
+            <div className="player-profile-modal">
+              <button className="player-profile-modal__close" type="button" onClick={() => setProfileOpen(false)} aria-label="Close">×</button>
+              {isGuestProfile ? (
+                <div className="player-profile-modal__locked">
+                  <span>{initials}</span>
+                  <h2>Login to mint your player profile</h2>
+                  <p>Guest mode can play as ZAP FC, but player cards belong to registered wallet clubs.</p>
+                </div>
+              ) : (
+                <>
+                  <PlayerCard
+                    cardImageUrl={PLAYER_CARD_FRAME}
+                    playerArtUrl={PLAYER_CARD_ART}
+                    crestUrl={clubCrest}
+                    matchCode={matchCode}
+                    playerName={clubName}
+                    rating={profileRating}
+                    driveAcc={Math.min(99, baseAccuracy + 4)}
+                    wideAcc={Math.min(99, baseAccuracy + 1)}
+                    longAcc={Math.max(35, baseAccuracy - 3)}
+                  />
+                  <div className="player-profile-modal__copy">
+                    <span>ONCHAIN PLAYER CARD</span>
+                    <h2>{clubName}</h2>
+                    <p>Dynamic stats are rendered as live HTML over the card frame, so the profile stays readable at every size.</p>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </main>
     </HomeStadiumBackdrop>
   );
 }
 
-function PvpRoomModal({ S, onClose, onPaired }) {
-  const [step, setStep] = useState("menu");
-  const [room, setRoom] = useState(null);
-  const [code, setCode] = useState("");
+const PVP_ACTIONS = [
+  { id:0, label:"DRIVE" },
+  { id:1, label:"WIDE" },
+  { id:2, label:"LONG" },
+];
+
+function formatPvpSessionId(value) {
+  if (!value && value !== 0n) return "-";
+  return value.toString();
+}
+
+function pvpStatusLabel(session) {
+  if (!session) return "NO SESSION";
+  if (session.lobbyStatus === 0) return "WAITING";
+  if (session.lobbyStatus === 2) return "CANCELLED";
+  const status = session.stateFields?.status;
+  if (status === 1) return "HALFTIME";
+  if (status === 2 || status === 3) return "FINISHED";
+  return session.turnStage === 0 ? "COMMIT" : "REVEAL";
+}
+
+function PvpRoomModal({ onClose, pvp }) {
+  const [joinId, setJoinId] = useState("");
+  const [session, setSession] = useState(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const clubName = S?.clubName || "ZAP FC";
-  const player = {
-    id: S?.wallet || `local-${clubName}`,
-    clubName,
-    rep: S?.rep || 50,
-  };
+  const [localCommit, setLocalCommit] = useState(null);
+  const hasPvp = !!pvp?.doCreatePvpRoom && !!pvp?.doJoinPvpRoom;
+  const activeTurn = session?.stateFields?.turnNumber ?? 0;
+  const canCommit = session?.lobbyStatus === 1 && session?.turnStage === 0 && session?.stateFields?.status === 0;
+  const canReveal = session?.lobbyStatus === 1 && session?.turnStage === 1 && localCommit?.turnNumber === activeTurn;
+  const canContinue = session?.stateFields?.status === 1;
 
-  useEffect(() => {
-    if (!room?.code) return undefined;
-    return subscribePvpRooms(() => {
-      const latest = getPvpRoom(room.code);
-      if (latest) setRoom(latest);
-    });
-  }, [room?.code]);
-
-  const create = () => {
+  const run = async (fn) => {
+    setBusy(true);
     setError("");
-    setRoom(createPvpRoom(player));
-    setStep("created");
-  };
-
-  const join = () => {
-    setError("");
-    const result = joinPvpRoom(code, player);
-    if (result.error) {
-      setError(result.error);
-      return;
+    try {
+      await fn();
+    } catch (err) {
+      setError(err?.message || String(err));
+    } finally {
+      setBusy(false);
     }
-    setRoom(result.room);
-    setStep("joined");
   };
 
-  const paired = room?.status === "paired";
-  const opponent = room?.host?.id === player.id ? room?.guest : room?.host;
+  const refresh = async (id = session?.sessionId) => {
+    if (!id) return;
+    const next = await pvp.doGetPvpSession(id);
+    if (next) setSession(next);
+  };
+
+  const createRoom = () => run(async () => {
+    const result = await pvp.doCreatePvpRoom();
+    setSession(result.session);
+    setJoinId(formatPvpSessionId(result.sessionId));
+    setLocalCommit(null);
+  });
+
+  const joinRoom = () => run(async () => {
+    const clean = joinId.trim();
+    if (!clean) throw new Error("Enter a room session id");
+    const result = await pvp.doJoinPvpRoom(clean);
+    setSession(result.session);
+    setLocalCommit(null);
+  });
+
+  const commitAction = (action) => run(async () => {
+    const salt = pvp.makePvpSalt();
+    const turnNumber = session?.stateFields?.turnNumber ?? 0;
+    const result = await pvp.doCommitPvpTurn(session.sessionId, action, salt, turnNumber);
+    setLocalCommit({ action, salt, turnNumber, commitHash: result.commitHash });
+    setSession(result.session);
+  });
+
+  const revealAction = () => run(async () => {
+    if (!localCommit) throw new Error("No local commit to reveal");
+    const result = await pvp.doRevealPvpTurn(session.sessionId, localCommit.action, localCommit.salt);
+    setSession(result.session);
+    setLocalCommit(null);
+  });
+
+  const claimTimeout = () => run(async () => {
+    const result = await pvp.doClaimPvpTimeout(session.sessionId);
+    setSession(result.session);
+  });
+
+  const continueHalf = () => run(async () => {
+    const result = await pvp.doContinuePvpAfterHalftime(session.sessionId);
+    setSession(result.session);
+  });
 
   return (
     <div className="zap-modal-backdrop">
       <div className="pvp-room-modal">
         <button className="pvp-room-modal__close" onClick={onClose} aria-label="Close">×</button>
-        <div className="pvp-room-modal__eyebrow">PVP ROOM</div>
-        <h2>{step === "menu" ? "Set up a private match" : paired ? "Rival paired" : "Waiting for rival"}</h2>
-        {step === "menu" && (
-          <p className="pvp-room-modal__warning">PVP is still in build. Rooms work for pairing, while live settlement and anti-cheat are still being connected.</p>
-        )}
+        <div className="pvp-room-modal__eyebrow">ONCHAIN PVP</div>
+        <h2>{session ? `Room ${formatPvpSessionId(session.sessionId)}` : "Create or join a room"}</h2>
+        <p className="pvp-room-modal__warning">Commit and reveal every turn. Keep this room open until your reveal confirms.</p>
 
-        {step === "menu" && (
-          <div className="pvp-room-modal__choices">
-            <button onClick={create}>
-              <strong>Create room</strong>
-              <span>Open a private room and wait for one rival.</span>
-            </button>
-            <button onClick={() => setStep("join")}>
-              <strong>Join room</strong>
-              <span>Use the room code from your rival.</span>
-            </button>
-          </div>
-        )}
-
-        {step === "join" && (
-          <div className="pvp-room-modal__join">
-            <input value={code} onChange={(e) => setCode(e.target.value.toUpperCase())} maxLength={6} placeholder="ROOM CODE" />
-            {error && <p>{error}</p>}
-            <div className="pvp-room-modal__actions">
-              <button onClick={() => setStep("menu")}>Back</button>
-              <button onClick={join}>Join</button>
-            </div>
-          </div>
-        )}
-
-        {room && step !== "join" && (
+        {!hasPvp && (
           <div className="pvp-room-modal__status">
-            <div>
-              <span>ROOM CODE</span>
-              <strong>{room.code}</strong>
-            </div>
-            <div>
-              <span>STATUS</span>
-              <strong>{paired ? "PAIRED" : "OPEN"}</strong>
-            </div>
-            <p>{paired ? `${opponent?.clubName || "Rival"} is in the room.` : "Share this code only with the player you want to face."}</p>
-            <button disabled>
-              {paired ? "MATCH LAUNCH LOCKED" : "Waiting..."}
-            </button>
+            <div><span>MODE</span><strong>MANIFEST MISSING</strong></div>
+            <p>Copy the fresh Sepolia manifest after migration so the frontend can see pvp_actions.</p>
           </div>
         )}
+
+        {hasPvp && !session && (
+          <>
+            <div className="pvp-room-modal__choices">
+              <button type="button" disabled={busy} onClick={createRoom}>
+                <strong>Create room</strong>
+                <span>You are home. Share the session id with your opponent.</span>
+              </button>
+              <button type="button" disabled={busy} onClick={joinRoom}>
+                <strong>Join room</strong>
+                <span>Paste your rival's session id below first.</span>
+              </button>
+            </div>
+            <div className="pvp-room-modal__join">
+              <input value={joinId} onChange={(e) => setJoinId(e.target.value)} placeholder="SESSION ID" />
+            </div>
+          </>
+        )}
+
+        {hasPvp && session && (
+          <div className="pvp-room-modal__status">
+            <div><span>STATUS</span><strong>{pvpStatusLabel(session)}</strong></div>
+            <div><span>TURN</span><strong>{activeTurn}</strong></div>
+            <p>
+              Score {session.stateFields?.scoreH ?? 0}-{session.stateFields?.scoreA ?? 0}.
+              {session.lobbyStatus === 0 ? " Waiting for an away player." : " Re-fetch after every action to avoid desync."}
+            </p>
+
+            {canCommit && (
+              <div className="pvp-room-modal__choices">
+                {PVP_ACTIONS.map((action) => (
+                  <button key={action.id} type="button" disabled={busy} onClick={() => commitAction(action.id)}>
+                    <strong>{action.label}</strong>
+                    <span>Commit hidden read</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {canReveal && (
+              <button type="button" disabled={busy} onClick={revealAction}>
+                Reveal {PVP_ACTIONS[localCommit.action]?.label || "ACTION"}
+              </button>
+            )}
+
+            {canContinue && (
+              <button type="button" disabled={busy} onClick={continueHalf}>Continue second half</button>
+            )}
+
+            <div className="pvp-room-modal__actions">
+              <button type="button" disabled={busy} onClick={() => refresh()}>Refresh</button>
+              <button type="button" disabled={busy || !session} onClick={claimTimeout}>Claim timeout</button>
+            </div>
+          </div>
+        )}
+
+        {error && <p className="pvp-room-modal__warning">{error}</p>}
       </div>
     </div>
   );
 }
 
-export function ModeSelectionScreen({ S, onSinglePlayer, onPvp, onBack }) {
+export function ModeSelectionScreen({ onSinglePlayer, onBack, pvp }) {
   const [pvpOpen, setPvpOpen] = useState(false);
   const modeCards = [
     {
       id:"pvp",
-      title:"PvP Category",
-      body:"Create or join a private room against another user.",
+      title:"PvP Match",
+      body:"Onchain commit-reveal matchmaking. Local rooms are disabled.",
       enabled:true,
       icon:"pvp",
+      accent:"#54e871",
+      status:"ONCHAIN ONLY",
+      meta:["COMMIT", "REVEAL", "TORII INDEXED"],
       action:() => setPvpOpen(true),
     },
     {
       id:"single",
-      title:"VS AI Category",
+      title:"VS AI",
       body:"Play against the AI and climb your read rating.",
       enabled:true,
       icon:"ai",
+      accent:"#38bdf8",
+      status:"FAST SOLO RUN",
+      meta:["15S PACING", "CPU RIVAL", "RANK PUSH"],
       action:onSinglePlayer,
     },
     {
       id:"spectator",
-      title:"Spectator Category",
+      title:"Spectator",
       body:"Watch other users play when live rooms open.",
       enabled:false,
       icon:"spectator",
+      accent:"#facc15",
+      status:"COMING SOON",
+      meta:["LIVE ROOMS", "SCOUT READS", "REPLAYS"],
     },
   ];
 
@@ -579,28 +719,30 @@ export function ModeSelectionScreen({ S, onSinglePlayer, onPvp, onBack }) {
               onClick={() => {
                 if (!mode.enabled) return;
                 mode.action?.();
-              }}
-              className={`mode-choice ${positionClass} ${mode.enabled ? "" : "is-disabled"}`}
-            >
-              <span className={`mode-choice__icon mode-choice__icon--${mode.icon}`} aria-hidden="true" />
-              <div className="mode-choice__copy">
-                <strong>{mode.title}</strong>
-                <p>{mode.body}</p>
-              </div>
-              <b>{mode.enabled ? "SELECT" : "LOCKED"}</b>
-            </button>
+	              }}
+	              className={`mode-choice ${positionClass} ${mode.enabled ? "" : "is-disabled"}`}
+	              style={{ "--mode-accent": mode.accent }}
+	            >
+	              <span className="mode-choice__scan" aria-hidden="true" />
+	              <span className={`mode-choice__icon mode-choice__icon--${mode.icon}`} aria-hidden="true" />
+	              <div className="mode-choice__copy">
+	                <span>{mode.status}</span>
+	                <strong>{mode.title}</strong>
+	                <p>{mode.body}</p>
+	              </div>
+	              <div className="mode-choice__meta" aria-hidden="true">
+	                {mode.meta.map((item) => <span key={item}>{item}</span>)}
+	              </div>
+	              <b>{mode.enabled ? "SELECT" : "LOCKED"}</b>
+	            </button>
             );
           })}
         </section>
 
         {pvpOpen && (
           <PvpRoomModal
-            S={S}
+            pvp={pvp}
             onClose={() => setPvpOpen(false)}
-            onPaired={(room) => {
-              setPvpOpen(false);
-              onPvp?.(room);
-            }}
           />
         )}
       </div>
@@ -649,10 +791,10 @@ export function MissionsScreen({ S, onPlay, onShop, onTeam, onClaimMission }) {
                   className={`mission-row ${mission.complete ? "is-complete" : "is-active"} ${mission.claimed ? "is-claimed" : ""} ${claimable ? "is-claimable" : ""}`}
                 >
                   {activeTab === "achievements" && (
-                    <span className="mission-row__badge" aria-hidden="true">
-                      <img src={MEDAL_ICON} alt="" draggable={false} />
-                    </span>
-                  )}
+	                    <span className="mission-row__badge" aria-hidden="true">
+	                      <img src={mission.asset || MEDAL_ICON} alt="" draggable={false} />
+	                    </span>
+	                  )}
                   <div className="mission-row__copy">
                     <span>{mission.reset}</span>
                     <h2>{mission.title}</h2>

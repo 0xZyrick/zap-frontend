@@ -61,12 +61,12 @@ class KatanaRpcProvider extends RpcProvider {
 export const devProvider = new KatanaRpcProvider({ nodeUrl: RPC_URL });
 
 export const devAccount = (() => {
-  const acc = new Account(
-    devProvider,
-    DEV_ACCOUNT.address,
-    DEV_ACCOUNT.privateKey,
-    undefined,
-    "0x3"
-  );
+  const acc = new Account({
+    provider: devProvider,
+    address: DEV_ACCOUNT.address,
+    signer: DEV_ACCOUNT.privateKey,
+    cairoVersion: undefined,
+    transactionVersion: "0x3",
+  });
   return acc;
 })();
